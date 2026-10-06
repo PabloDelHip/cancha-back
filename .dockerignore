@@ -1,0 +1,32 @@
+# Dependencias y artefactos: se instalan/compilan dentro de la imagen.
+node_modules
+dist
+dist-seed
+coverage
+*.tsbuildinfo
+
+# Secretos y configuración local: NUNCA dentro de la imagen (se configuran en Cloud Run).
+.env
+.env.*
+
+# Control de versiones, editores, logs y temporales.
+.git
+.gitignore
+.vscode
+.idea
+logs
+*.log
+npm-debug.log*
+tmp
+.tmp
+*.tmp
+*.swp
+.DS_Store
+
+# No necesarios para compilar ni ejecutar (tsconfig.build.json excluye test/).
+test
+vitest.config.ts
+vitest.config.e2e.ts
+README.md
+Dockerfile
+.dockerignore
