@@ -63,7 +63,7 @@ export class CreateTeamDto {
   @ApiPropertyOptional({
     nullable: true,
     type: String,
-    example: 'Mazatlán, Sin.',
+    example: 'Cancún, Q. Roo',
   })
   @IsOptional()
   @Trim()

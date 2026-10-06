@@ -22,6 +22,7 @@ import {
   PlayerMatchStatsSchema,
 } from '../modules/matches/schemas/player-match-stats.schema.js';
 import { Round, RoundSchema } from '../modules/rounds/schemas/round.schema.js';
+import { League, LeagueSchema } from '../modules/leagues/schemas/league.schema.js';
 import { User, UserSchema } from '../modules/users/schemas/user.schema.js';
 import { TeamAdmin, TeamAdminSchema } from '../modules/teams/schemas/team-admin.schema.js';
 import { TeamRoster, TeamRosterSchema } from '../modules/teams/schemas/team-roster.schema.js';
@@ -39,6 +40,7 @@ import {
  * (y sin dependencias circulares).
  */
 export const Models = {
+  league: { name: League.name, schema: LeagueSchema },
   tournament: { name: Tournament.name, schema: TournamentSchema },
   tournamentTeam: { name: TournamentTeam.name, schema: TournamentTeamSchema },
   team: { name: Team.name, schema: TeamSchema },

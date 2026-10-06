@@ -78,7 +78,7 @@ function mulberry32(seed: number) {
 
 // ─── Catálogo fijo ──────────────────────────────────────────────────────────
 
-/** Organizador A: dueño de las ligas de Mazatlán. */
+/** Organizador A: dueño de las ligas de Cancún. */
 export const MOCK_ORGANIZER_A = 'u-organizer'
 /** Organizador B: dueño de la liga de Cancún. */
 export const MOCK_ORGANIZER_B = 'u-organizer-2'
@@ -90,7 +90,7 @@ export const DEMO_PASSWORD = 'Demo12345'
 const TEAM_DEFS: { id: ID; name: string; shortName: string; colors: [string, string]; strength: number }[] = [
   { id: 'team-halcones', name: 'Halcones FC', shortName: 'HAL', colors: ['#0f766e', '#facc15'], strength: 1.35 },
   { id: 'team-tigres', name: 'Tigres FC', shortName: 'TIG', colors: ['#ea580c', '#1f2937'], strength: 1.25 },
-  { id: 'team-real', name: 'Real Mazatlán', shortName: 'RMZ', colors: ['#1d4ed8', '#f8fafc'], strength: 1.1 },
+  { id: 'team-real', name: 'Real Cancún', shortName: 'RMZ', colors: ['#1d4ed8', '#f8fafc'], strength: 1.1 },
   { id: 'team-atlas', name: 'Atlas FC', shortName: 'ATL', colors: ['#b91c1c', '#111827'], strength: 1.0 },
   { id: 'team-olas', name: 'Deportivo Olas', shortName: 'OLA', colors: ['#0284c7', '#e0f2fe'], strength: 0.85 },
   { id: 'team-venados', name: 'Venados del Puerto', shortName: 'VEN', colors: ['#7c2d12', '#fbbf24'], strength: 0.8 },
@@ -163,7 +163,7 @@ export function createSeed(): MockDatabase {
     shortName: t.shortName,
     logoUrl: null,
     colors: { primary: t.colors[0], secondary: t.colors[1] },
-    city: 'Mazatlán, Sin.',
+    city: 'Cancún, Q. Roo',
     createdBy: ORGANIZER_ID,
     ...ts,
   }))
@@ -258,7 +258,7 @@ export function createSeed(): MockDatabase {
   const tournaments: Tournament[] = [
     {
       id: 't-apertura-2027',
-      name: 'Liga Mazatlán Apertura 2027',
+      name: 'Liga Cancún Apertura 2027',
       modality: 'F7',
       category: 'Libre varonil',
       startDate: '2027-01-16',

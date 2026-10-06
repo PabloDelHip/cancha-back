@@ -16,6 +16,7 @@ import { UsersModule } from './modules/users/users.module.js';
 import { RegistrationModule } from './modules/registration/registration.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { MeModule } from './modules/me/me.module.js';
+import { LeaguesModule } from './modules/leagues/leagues.module.js';
 import { MediaModule } from './modules/media/media.module.js';
 import { AuthorizationModule } from './common/authorization/authorization.module.js';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
@@ -57,6 +58,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
     MeModule,
     AuthModule,
     HealthModule,
+    LeaguesModule,
     TournamentsModule,
     TeamsModule,
     PlayersModule,

@@ -122,7 +122,12 @@ import { PaginationQueryDto } from '../../../common/dto/pagination.dto.js';
 import { IsISODateOnly, Trim } from '../../../common/validators.js';
 
 export class CreateTournamentDto {
-  @ApiProperty({ example: 'Liga Mazatlán Apertura 2027' })
+  @ApiPropertyOptional({ description: 'Liga (tuya) a la que pertenece. Si se omite, tu liga por defecto.' })
+  @IsOptional()
+  @IsMongoId()
+  leagueId?: string;
+
+  @ApiProperty({ example: 'Liga Cancún Apertura 2027' })
   @Trim()
   @IsString()
   @IsNotEmpty()

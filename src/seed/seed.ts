@@ -29,10 +29,11 @@ import { Models } from '../common/models.js';
 import { normalizeSearch } from '../modules/players/schemas/player.schema.js';
 import { createSeed, DEMO_PASSWORD } from './demo-data.js';
 import { UsersService } from '../modules/users/users.service.js';
+import { LeagueAccessService } from '../common/authorization/league-access.service.js';
 
 /**
  * Organizadores demo. SOLO PARA DESARROLLO: credenciales públicas documentadas en el README.
- * - A: demo@cancha.local → ligas de Mazatlán (y custodio de sus equipos y jugadores).
+ * - A: demo@cancha.local → ligas de Cancún (y custodio de sus equipos y jugadores).
  * - B: organizador2@cancha.local → Liga Cancún 2027.
  * Ambos con contraseña DEMO_PASSWORD (Demo12345). Salen del mismo generador que los mocks.
  */
@@ -120,6 +121,8 @@ async function run() {
       // Etapa 7: enlaces y solicitudes de inscripción (referencian torneos, equipos y jugadores).
       registrationLinks: model(Models.registrationLink),
       registrationRequests: model(Models.registrationRequest),
+      // Ligas: cada torneo vive en una (los del seed, en la liga por defecto de su organizador).
+      leagues: model(Models.league),
     };
 
     const all = Object.values(m) as Model<unknown>[];
@@ -201,6 +204,11 @@ async function run() {
         organizerId: owner(t.organizerId),
       })),
     );
+    // Todo torneo pertenece a una liga: los del seed, a la liga por defecto de su organizador.
+    const leagueAccess = app.get(LeagueAccessService);
+    for (const organizerId of (await m.tournaments.distinct('organizerId', { leagueId: null })) as Types.ObjectId[]) {
+      await m.tournaments.updateMany({ organizerId, leagueId: null }, { $set: { leagueId: await leagueAccess.defaultLeagueId(organizerId) } });
+    }
     await m.enrollments.insertMany(
       data.tournamentTeams.map((e) => ({
         tournamentId: oid(e.tournamentId),

@@ -21,7 +21,8 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "seed": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/seed/seed.js",
     "test:unit": "vitest run",
-    "team:assign-owner": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/assign-team-owner.js"
+    "team:assign-owner": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/assign-team-owner.js",
+    "leagues:migrate": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/migrate-leagues.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

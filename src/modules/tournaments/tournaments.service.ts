@@ -29,6 +29,7 @@ import {
   type WithId,
 } from '../../common/utils/serialize.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
+import { LeagueAccessService } from '../../common/authorization/league-access.service.js';
 import { OrganizerAccessService } from '../../common/authorization/organizer-access.service.js';
 import { validateFormatSettings } from '../competition/formats.js';
 import { CompetitionService } from '../competition/competition.service.js';
@@ -49,6 +50,7 @@ export class TournamentsService {
     private readonly ownership: OwnershipService,
     private readonly competition: CompetitionService,
     private readonly organizers: OrganizerAccessService,
+    private readonly leagues: LeagueAccessService,
   ) {}
 
   /** Listado público. */
@@ -75,9 +77,12 @@ export class TournamentsService {
     // Crear torneos requiere la capacidad de organizar (activada o ya organizando alguno).
     await this.organizers.requireOrganizer(user);
     assertDateRange(dto.startDate, dto.endDate);
+    // Todo torneo vive en una liga del organizador (la indicada o su liga por defecto).
+    const leagueId = await this.leagues.forNewTournament(user, dto.leagueId);
     // El propietario sale del JWT; el DTO ni siquiera admite organizerId.
     const created = await this.tournaments.create({
       ...dto,
+      leagueId,
       settings: mergeSettings(DEFAULT_SETTINGS, dto.settings),
       organizerId: toObjectId(user.id),
     });
@@ -87,6 +92,8 @@ export class TournamentsService {
   /** Datos y configuración. El estado no: tiene acciones propias (start/finish). */
   async update(id: string, dto: UpdateTournamentDto, user: AuthUser) {
     await this.ownership.tournament(id, user);
+    // Cambiar de liga: solo a otra liga propia.
+    if (dto.leagueId) await this.leagues.owned(dto.leagueId, user);
     // Con el cerrojo: no se cuela un cambio en un torneo que se está finalizando.
     return this.ownership.inTournament(id, async (session) => {
       const current = (await this.tournaments.findById(id).session(session).lean())!;
@@ -96,6 +103,8 @@ export class TournamentsService {
       );
       const { resetSchedule, trackedTeamIds, ...fields } = dto;
       const update: Record<string, unknown> = { ...fields };
+      // Explícito: la liga se guarda como ObjectId (las consultas por liga lo comparan así).
+      if (dto.leagueId) update.leagueId = toObjectId(dto.leagueId);
       Object.assign(update, await this.trackedUpdate(id, current, dto.dataCoverage, trackedTeamIds, session));
       // PARTIAL → FULL con partidos sueltos (a mano) en un formato con estructura: esos partidos
       // entrarían en tablas o cuadros que no los esperan. Primero hay que pasar el formato a Liga.

@@ -178,6 +178,10 @@ export class Tournament {
   @Prop({ type: TournamentRegistrationSettingsSchema, default: () => ({ ...DEFAULT_REGISTRATION }) })
   registration: TournamentRegistrationSettings;
 
+  /** Liga a la que pertenece (todo torneo vive en una; null solo en documentos previos a las ligas). */
+  @Prop({ type: Types.ObjectId, ref: 'League', default: null, index: true })
+  leagueId: Types.ObjectId | null;
+
   /** Organizador propietario (User). Se toma del JWT al crear; nunca del cliente. */
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   organizerId: Types.ObjectId;
