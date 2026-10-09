@@ -17,6 +17,8 @@ export interface ImagePreset {
 export const IMAGE_PRESETS = {
   playerPhoto: { folder: 'kikovo/players', incoming: 'c_limit,w_800,h_800', delivery: 'f_auto,q_auto' },
   teamLogo: { folder: 'kikovo/teams', incoming: 'c_limit,w_512,h_512', delivery: 'f_auto,q_auto' },
+  // Portada: se guarda la foto completa (el encuadre lo hace cada pantalla con coverPosition).
+  teamCover: { folder: 'kikovo/covers', incoming: 'c_limit,w_1920,h_1920', delivery: 'f_auto,q_auto' },
 } as const satisfies Record<string, ImagePreset>;
 
 export interface StoredImage {

@@ -169,7 +169,7 @@ describe('Tournament.settings y tabla de posiciones', () => {
     await as(A).patch(`/api/tournaments/${id}`).send({ settings: { system: 'SWISS' } }).expect(400);
     // formatos válidos con configuración imposible (ver competition-formats.e2e-spec.ts)
     await as(A).patch(`/api/tournaments/${id}`).send({ settings: { system: 'GROUPS_KNOCKOUT', groupCount: 3, qualifiersPerGroup: 1 } }).expect(400);
-    await as(A).patch(`/api/tournaments/${id}`).send({ settings: { system: 'LEAGUE_PLAYOFFS', playoffTeams: 6 } }).expect(400);
+    await as(A).patch(`/api/tournaments/${id}`).send({ settings: { system: 'LEAGUE_PLAYOFFS', playoffTeams: 1 } }).expect(400);
     await as(B).patch(`/api/tournaments/${id}`).send({ settings: { pointsForWin: 2 } }).expect(403);
   });
 

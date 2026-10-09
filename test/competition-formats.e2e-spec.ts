@@ -279,6 +279,33 @@ describe('LEAGUE_PLAYOFFS', () => {
     expect((await api().get(`/api/teams/${tm[0]}/profile`).expect(200)).body.honors).toEqual([]);
     expect((await api().get(`/api/teams/${tm[1]}/profile`).expect(200)).body.honors).toHaveLength(1);
   });
+
+  it('top 6: 1º y 2º pasan directo a semifinales; 3º-6º y 4º-5º juegan por los otros dos lugares', async () => {
+    const t = await tournament({ system: 'LEAGUE_PLAYOFFS', playoffTeams: 6 });
+    const tm = await teams(t, 8);
+    await schedule(t).expect(201);
+    await playPending(t, better(tm)); // tabla: tm0 > tm1 > … > tm7
+    // Vista previa: muestra la propuesta sin crear nada; el organizador decide si la usa.
+    const before = (await matchesOf(t)).length;
+    const preview = (await as().post(`/api/tournaments/${t}/phases/advance/preview`).send({ startDate: '2027-05-01' }).expect(200)).body;
+    expect(preview.rounds.map((r: { name: string }) => r.name)).toEqual(['Cuartos de final', 'Semifinal', 'Final']);
+    expect(preview.seeds.map((x: { teamId: string }) => x.teamId)).toEqual(tm.slice(0, 6));
+    expect(preview.matches.map((m: { homeTeamId: string; awayTeamId: string }) => [m.homeTeamId, m.awayTeamId])).toEqual([[tm[3], tm[4]], [tm[2], tm[5]]]);
+    expect((await matchesOf(t)).length).toBe(before);
+    expect((await structure(t)).phases.find((p: { type: string }) => p.type === 'KNOCKOUT').generated).toBe(false);
+    await authed(http, (await registerOrganizer(http, 'Otro')).token).post(`/api/tournaments/${t}/phases/advance/preview`).send({ startDate: '2027-05-01' }).expect(403);
+    const ko = koPhase((await advance(t).expect(200)).body);
+    expect(ko.seeds.map((x) => x.teamId)).toEqual(tm.slice(0, 6));
+    expect(ko.rounds.map((r) => r.name)).toEqual(['Cuartos de final', 'Semifinal', 'Final']);
+    const firstRound = ko.rounds[0].ties.map((x) => (x.bye ? ['BYE', x.winnerTeamId] : [x.homeTeamId, x.awayTeamId]));
+    expect(firstRound).toEqual([['BYE', tm[0]], [tm[3], tm[4]], ['BYE', tm[1]], [tm[2], tm[5]]]);
+    // Solo se juegan los dos cruces 3-6 y 4-5; las semis esperan a sus ganadores.
+    expect((await matchesOf(t)).filter((m) => m.stage?.phase === 1)).toHaveLength(2);
+    await playBracket(t, better([tm[4], tm[5], tm[0], tm[1]]));
+    const final = koPhase(await structure(t));
+    expect(final.rounds[1].ties.map((x) => [x.homeTeamId, x.awayTeamId])).toEqual([[tm[0], tm[4]], [tm[1], tm[5]]]);
+    expect(final.championTeamId).toBe(tm[4]);
+  });
 });
 
 describe('Configuración y reglas de escritura', () => {

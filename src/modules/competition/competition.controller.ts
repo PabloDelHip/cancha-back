@@ -35,6 +35,18 @@ export class CompetitionController {
     return this.service.advance(id, dto, user);
   }
 
+  @Post('phases/advance/preview')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Vista previa de la eliminatoria (no guarda nada)',
+    description: 'Los cruces, quién pasa directo y las fechas que generaría `phases/advance` con el mismo cuerpo. El organizador decide si la usa.',
+  })
+  @ApiConflictResponse({ description: 'Fase anterior incompleta o empate sin resolver' })
+  previewAdvance(@Param('id', IsObjectIdPipe) id: string, @Body() dto: AdvancePhaseDto, @CurrentUser() user: AuthUser) {
+    return this.service.previewAdvance(id, dto, user);
+  }
+
   @Post('phases/:phase/ties')
   @ApiBearerAuth()
   @ApiOperation({

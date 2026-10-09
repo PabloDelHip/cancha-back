@@ -62,9 +62,11 @@ export class TournamentSettingsDto {
   @Max(16)
   qualifiersPerGroup?: number | null;
 
-  @ApiPropertyOptional({ enum: [2, 4, 8, 16], nullable: true })
+  @ApiPropertyOptional({ minimum: 2, maximum: 64, nullable: true, description: 'Si no es potencia de 2, los mejores de la tabla pasan directo (BYE).' })
   @IsOptional()
-  @IsIn([2, 4, 8, 16])
+  @IsInt()
+  @Min(2)
+  @Max(64)
   playoffTeams?: number | null;
 
   @ApiPropertyOptional({ minimum: 0, maximum: 10, default: 3 })

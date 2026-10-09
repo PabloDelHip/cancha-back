@@ -75,6 +75,18 @@ describe('Ligas: dueño y torneos', () => {
     expect((await api().get('/api/leagues').expect(200)).body.some((l: { id: string }) => l.id === league.id)).toBe(true);
   });
 
+  it('liga por defecto: "Liga de <nombre>", o el nombre tal cual si la cuenta ya se llama "Liga …"', async () => {
+    const reg = async (firstName: string, lastName: string) => {
+      const r = await api().post('/api/auth/register').send({ firstName, lastName, email: `n${++seq}@x.test`, password: 'password123' }).expect(201);
+      const o = { id: r.body.user.id, token: r.body.accessToken } as Org;
+      await as(o).post('/api/me/organizer').expect(200);
+      await tournament(o, {});
+      return ((await as(o).get('/api/admin/leagues').expect(200)).body as { name: string }[])[0]!.name;
+    };
+    expect(await reg('Ana', 'Pérez')).toBe('Liga de Ana Pérez');
+    expect(await reg('Liga', 'Norte Fut 7')).toBe('Liga Norte Fut 7');
+  });
+
   it('crear una liga exige poder organizar', async () => {
     const res = await api().post('/api/auth/register').send({ firstName: 'Sin', lastName: 'Organizar', email: `sin${++seq}@x.test`, password: 'password123' }).expect(201);
     const r = await authed(http, res.body.accessToken).post('/api/leagues').send({ name: 'Nope' }).expect(403);

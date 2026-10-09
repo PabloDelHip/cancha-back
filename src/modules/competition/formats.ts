@@ -35,7 +35,8 @@ export const FORMATS: Record<CompetitionSystem, FormatDefinition> = {
   },
 };
 
-export const PLAYOFF_SIZES = [2, 4, 8, 16] as const;
+/** Clasificados a playoffs: cualquier número; si no es potencia de 2, los mejores pasan directo (BYE). */
+export const MAX_PLAYOFF_TEAMS = 64;
 export const MAX_GROUPS = 8;
 
 export function phasesOf(system: CompetitionSystem | undefined | null): PhaseType[] {
@@ -68,8 +69,9 @@ export function validateFormatSettings(s: FormatSettings): string[] {
       );
     }
   }
-  if (s.system === CompetitionSystem.LEAGUE_PLAYOFFS && !PLAYOFF_SIZES.includes((s.playoffTeams ?? 0) as 2)) {
-    errors.push('Los playoffs deben ser de 2, 4, 8 o 16 equipos');
+  if (s.system === CompetitionSystem.LEAGUE_PLAYOFFS) {
+    const p = s.playoffTeams ?? 0;
+    if (!Number.isInteger(p) || p < 2 || p > MAX_PLAYOFF_TEAMS) errors.push(`A playoffs deben clasificar entre 2 y ${MAX_PLAYOFF_TEAMS} equipos`);
   }
   return errors;
 }

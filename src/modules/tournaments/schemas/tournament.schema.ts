@@ -61,7 +61,7 @@ export class TournamentSettings {
   @Prop({ type: Number, default: null })
   qualifiersPerGroup: number | null;
 
-  /** LEAGUE_PLAYOFFS: equipos que clasifican a playoffs (2, 4, 8 o 16). */
+  /** LEAGUE_PLAYOFFS: equipos que clasifican a playoffs (2–64; si no es potencia de 2, los mejores pasan directo). */
   @Prop({ type: Number, default: null })
   playoffTeams: number | null;
 }

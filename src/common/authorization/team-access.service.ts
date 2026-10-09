@@ -21,7 +21,7 @@ import { toObjectId } from '../utils/serialize.js';
 export type TeamAccessLevel = TeamAdminRole | 'CUSTODIAN';
 
 /** Lo que un MANAGER puede cambiar. Nombre y abreviatura (identidad) quedan para OWNER/custodio. */
-export const MANAGER_EDITABLE_FIELDS = ['logoUrl', 'colors', 'city'] as const;
+export const MANAGER_EDITABLE_FIELDS = ['logoUrl', 'colors', 'city', 'coverUrl', 'coverPosition'] as const;
 
 const ACTIVE = TeamAdminStatus.ACTIVE;
 

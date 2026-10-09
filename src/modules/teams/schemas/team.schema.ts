@@ -29,6 +29,21 @@ export class Team {
   @Prop({ type: String, default: null })
   logoPublicId: string | null;
 
+  /** Foto de portada del perfil (Cloudinary). null = la portada de siempre (colores del equipo). */
+  @Prop({ type: String, default: null })
+  coverUrl: string | null;
+
+  /** public_id de la portada en Cloudinary. Interno. */
+  @Prop({ type: String, default: null })
+  coverPublicId: string | null;
+
+  /**
+   * Encuadre de la portada, como en Facebook: punto de la foto (en %) que queda al centro del
+   * recorte. La foto se guarda completa y cada pantalla recorta alrededor de ese punto.
+   */
+  @Prop({ type: Object, default: () => ({ x: 50, y: 50 }) })
+  coverPosition: { x: number; y: number };
+
   @Prop({
     type: TeamColors,
     default: () => ({ primary: '#15803d', secondary: '#fafafa' }),

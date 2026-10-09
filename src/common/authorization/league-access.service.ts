@@ -39,7 +39,9 @@ export class LeagueAccessService {
     const found = await this.leagues.findOne({ organizerId, isDefault: true }).select('_id').session(session).lean();
     if (found) return found._id;
     const user = await this.users.findById(organizerId).select('firstName lastName').session(session).lean();
-    const name = user ? `Liga de ${user.firstName} ${user.lastName}`.trim() : 'Mi liga';
+    const full = user ? `${user.firstName} ${user.lastName}`.trim() : '';
+    // Si la cuenta ya se llama como una liga ("Liga Fut 7 …"), se usa tal cual: nada de "Liga de Liga …".
+    const name = !full ? 'Mi liga' : /^liga\b/i.test(full) ? full : `Liga de ${full}`;
     try {
       const [created] = await this.leagues.create([{ name, organizerId, isDefault: true }], { session });
       return created._id;

@@ -108,7 +108,7 @@ export class TeamProfileService {
     }
 
     return buildTeamProfile({
-      team: { ...teamRef(team), city: team.city ?? null },
+      team: { ...teamRef(team), city: team.city ?? null, coverUrl: team.coverUrl ?? null, coverPosition: team.coverPosition ?? { x: 50, y: 50 } },
       tournaments: new Map(
         tournaments.map((t): [string, TPTournament] => [
           t._id.toHexString(),

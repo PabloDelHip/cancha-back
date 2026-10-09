@@ -26,6 +26,7 @@ import { CloudinaryService, IMAGE_PRESETS } from '../media/cloudinary.service.js
 import type { UploadedImage } from '../media/image-upload.js';
 
 const TEAM_LOGO = { url: 'logoUrl', publicId: 'logoPublicId' };
+const TEAM_COVER = { url: 'coverUrl', publicId: 'coverPublicId' };
 
 @Injectable()
 export class TeamsService {
@@ -165,6 +166,25 @@ export class TeamsService {
     return serialize((await this.teams.findById(id).lean())!);
   }
 
+  /**
+   * PUT /teams/:id/cover — sube (o reemplaza) la foto de portada. Mismo permiso que el logo
+   * (OWNER, MANAGER o custodio sin OWNER). Una foto nueva empieza centrada.
+   */
+  async setCover(id: string, file: UploadedImage | undefined, user: AuthUser) {
+    await this.access.requireIdentityEdit(id, user, ['coverUrl']);
+    await this.images.replace(this.teams, id, TEAM_COVER, file, IMAGE_PRESETS.teamCover);
+    await this.teams.updateOne({ _id: toObjectId(id) }, { $set: { coverPosition: { x: 50, y: 50 } } });
+    return serialize((await this.teams.findById(id).lean())!);
+  }
+
+  /** DELETE /teams/:id/cover — quita la portada: vuelve el diseño de siempre. */
+  async removeCover(id: string, user: AuthUser) {
+    await this.access.requireIdentityEdit(id, user, ['coverUrl']);
+    await this.images.remove(this.teams, id, TEAM_COVER);
+    await this.teams.updateOne({ _id: toObjectId(id) }, { $set: { coverPosition: { x: 50, y: 50 } } });
+    return serialize((await this.teams.findById(id).lean())!);
+  }
+
   /** DELETE /teams/:id/logo — quita el logo (y lo borra de Cloudinary si se subió aquí). */
   async removeLogo(id: string, user: AuthUser) {
     await this.access.requireIdentityEdit(id, user, ['logoUrl']);
@@ -212,6 +232,7 @@ export class TeamsService {
     await this.rosters.deleteMany({ teamId });
     await this.teams.deleteOne({ _id: teamId });
     await this.cloudinary.destroy(current.logoPublicId);
+    await this.cloudinary.destroy(current.coverPublicId);
   }
 
   private async buildFilter(query: TeamQueryDto) {

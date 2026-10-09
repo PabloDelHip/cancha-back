@@ -2,6 +2,9 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsMongoId,
+  IsNumber,
+  Max,
+  Min,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -72,7 +75,27 @@ export class CreateTeamDto {
   city?: string | null;
 }
 
-export class UpdateTeamDto extends PartialType(CreateTeamDto) {}
+export class CoverPositionDto {
+  @ApiProperty({ minimum: 0, maximum: 100, example: 50 })
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  x: number;
+
+  @ApiProperty({ minimum: 0, maximum: 100, example: 70 })
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  y: number;
+}
+
+export class UpdateTeamDto extends PartialType(CreateTeamDto) {
+  @ApiPropertyOptional({ type: CoverPositionDto, description: 'Encuadre de la portada (punto central en %). La foto se sube con PUT /teams/:id/cover.' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CoverPositionDto)
+  coverPosition?: CoverPositionDto;
+}
 
 export class TeamQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ description: 'Busca por nombre' })

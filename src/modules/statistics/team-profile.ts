@@ -73,7 +73,7 @@ export type TPTournament = TournamentRef & {
 };
 
 export interface TeamProfileInput {
-  team: TeamRef & { city: string | null };
+  team: TeamRef & { city: string | null; coverUrl: string | null; coverPosition: { x: number; y: number } };
   tournaments: Map<string, TPTournament>;
   enrolledTournamentIds: Set<string>;
   /** Todos los partidos de los torneos del equipo (para tablas y pendientes). */

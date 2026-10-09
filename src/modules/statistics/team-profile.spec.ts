@@ -59,7 +59,7 @@ function build(opts: {
   const tt = new Map(Object.entries(opts.tournamentTeams ?? {}));
   for (const t of opts.tournaments) if (!tt.has(t.id)) tt.set(t.id, ['a', 'b', 'c', 'd']);
   return buildTeamProfile({
-    team: { ...ref('a'), city: 'Mazatlán' },
+    team: { ...ref('a'), city: 'Mazatlán', coverUrl: null, coverPosition: { x: 50, y: 50 } },
     tournaments: new Map(opts.tournaments.map((t) => [t.id, t])),
     enrolledTournamentIds: new Set(opts.enrolled ?? opts.tournaments.map((t) => t.id)),
     tournamentMatches: byT,

@@ -123,10 +123,12 @@ describe('bracket: reconcile', () => {
 });
 
 describe('formatos: configuración', () => {
-  it('grupos: los clasificados deben formar un cuadro (potencia de 2); playoffs 2/4/8/16', () => {
+  it('grupos: los clasificados deben formar un cuadro (potencia de 2); playoffs de cualquier tamaño (BYEs)', () => {
     expect(validateFormatSettings({ system: CompetitionSystem.GROUPS_KNOCKOUT, groupCount: 4, qualifiersPerGroup: 2 })).toEqual([]);
     expect(validateFormatSettings({ system: CompetitionSystem.GROUPS_KNOCKOUT, groupCount: 3, qualifiersPerGroup: 1 })[0]).toMatch(/Clasificarían 3/);
-    expect(validateFormatSettings({ system: CompetitionSystem.LEAGUE_PLAYOFFS, playoffTeams: 6 })).toHaveLength(1);
+    expect(validateFormatSettings({ system: CompetitionSystem.LEAGUE_PLAYOFFS, playoffTeams: 6 })).toEqual([]);
+    expect(validateFormatSettings({ system: CompetitionSystem.LEAGUE_PLAYOFFS, playoffTeams: 1 })).toHaveLength(1);
+    expect(validateFormatSettings({ system: CompetitionSystem.LEAGUE_PLAYOFFS, playoffTeams: 65 })).toHaveLength(1);
     expect(validateFormatSettings({ system: CompetitionSystem.LEAGUE_PLAYOFFS, playoffTeams: 8 })).toEqual([]);
   });
 

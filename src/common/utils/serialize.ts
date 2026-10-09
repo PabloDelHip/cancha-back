@@ -6,10 +6,10 @@ import { Types } from 'mongoose';
  *   (los listados de /admin devuelven `canEdit` calculado por el backend).
  * - searchName: índice de búsqueda.
  * - writeSeq: cerrojo lógico de escrituras del torneo.
- * - photoPublicId / logoPublicId: id del archivo en Cloudinary (para reemplazarlo o borrarlo).
+ * - photoPublicId / logoPublicId / coverPublicId: id del archivo en Cloudinary (para reemplazarlo o borrarlo).
  */
-const INTERNAL_FIELDS = new Set(['__v', 'organizerId', 'createdBy', 'searchName', 'writeSeq', 'photoPublicId', 'logoPublicId']);
-type InternalField = '_id' | '__v' | 'organizerId' | 'createdBy' | 'searchName' | 'writeSeq' | 'photoPublicId' | 'logoPublicId';
+const INTERNAL_FIELDS = new Set(['__v', 'organizerId', 'createdBy', 'searchName', 'writeSeq', 'photoPublicId', 'logoPublicId', 'coverPublicId']);
+type InternalField = '_id' | '__v' | 'organizerId' | 'createdBy' | 'searchName' | 'writeSeq' | 'photoPublicId' | 'logoPublicId' | 'coverPublicId';
 
 /**
  * Convierte un documento `lean()` en JSON para la API:

@@ -245,3 +245,74 @@ describe('Logo de equipo', () => {
     await send(as(A).put(`/api/teams/${new Types.ObjectId().toHexString()}/logo`)).expect(404);
   });
 });
+
+describe('Portada de equipo', () => {
+  let dep: string;
+  beforeAll(async () => {
+    dep = await newTeam(A);
+    await admins.assignOwner(dep, owner.id);
+    await as(owner).post(`/api/teams/${dep}/managers`).send({ userId: manager.id }).expect(201);
+  });
+  const cover = async (id: string) => (await teams.findById(id).lean())!;
+
+  it('sin portada: coverUrl null y encuadre centrado (se ve el diseño de siempre)', async () => {
+    const t = (await api().get(`/api/teams/${dep}`).expect(200)).body;
+    expect(t.coverUrl).toBeNull();
+    expect(t.coverPosition).toEqual({ x: 50, y: 50 });
+  });
+
+  it('OWNER sube (foto completa, 1920 px); MANAGER ajusta el encuadre; public_id nunca expuesto', async () => {
+    const r = await send(as(owner).put(`/api/teams/${dep}/cover`), JPG, 'image/jpeg', 'portada.jpg').expect(200);
+    expect(r.body.coverUrl).toMatch(/\/kikovo\/covers\/img\d+$/);
+    expect(r.body).not.toHaveProperty('coverPublicId');
+    expect(upload.mock.calls[0][1]).toMatchObject({ folder: 'kikovo/covers', incoming: 'c_limit,w_1920,h_1920' });
+    const p = await as(manager).patch(`/api/teams/${dep}`).send({ coverPosition: { x: 40, y: 72.5 } }).expect(200);
+    expect(p.body.coverPosition).toEqual({ x: 40, y: 72.5 });
+    expect((await api().get(`/api/teams/${dep}/profile`).expect(200)).body.team).toMatchObject({ coverPosition: { x: 40, y: 72.5 } });
+    expect(JSON.stringify((await api().get(`/api/teams/${dep}/profile`).expect(200)).body)).not.toContain('coverPublicId');
+  });
+
+  it('una foto nueva reemplaza (borra la anterior) y vuelve a empezar centrada', async () => {
+    const before = (await cover(dep)).coverPublicId;
+    const r = await send(as(manager).put(`/api/teams/${dep}/cover`)).expect(200);
+    expect(destroy).toHaveBeenCalledWith(before);
+    expect(r.body.coverPosition).toEqual({ x: 50, y: 50 });
+  });
+
+  it('encuadre fuera de 0–100 o la URL a mano → 400 sin cambios', async () => {
+    const before = await cover(dep);
+    await as(owner).patch(`/api/teams/${dep}`).send({ coverPosition: { x: 120, y: 50 } }).expect(400);
+    await as(owner).patch(`/api/teams/${dep}`).send({ coverPosition: { x: 50 } }).expect(400);
+    await as(owner).patch(`/api/teams/${dep}`).send({ coverUrl: 'https://example.com/x.jpg' }).expect(400);
+    const after = await cover(dep);
+    expect(after.coverUrl).toBe(before.coverUrl);
+    expect(after.coverPosition).toEqual(before.coverPosition);
+  });
+
+  it('permisos: creador con OWNER, otro usuario → 403 (nada subido ni movido); sin sesión 401; custodio sin OWNER sí', async () => {
+    const before = await cover(dep);
+    await send(as(A).put(`/api/teams/${dep}/cover`)).expect(403);
+    await send(as(B).put(`/api/teams/${dep}/cover`)).expect(403);
+    await as(B).patch(`/api/teams/${dep}`).send({ coverPosition: { x: 0, y: 0 } }).expect(403);
+    await as(B).delete(`/api/teams/${dep}/cover`).expect(403);
+    await send(api().put(`/api/teams/${dep}/cover`)).expect(401);
+    expect(upload).not.toHaveBeenCalled();
+    expect(await cover(dep)).toMatchObject({ coverUrl: before.coverUrl, coverPosition: before.coverPosition });
+    const t = await newTeam(B);
+    await send(as(B).put(`/api/teams/${t}/cover`)).expect(200);
+  });
+
+  it('quitar la portada la borra de Cloudinary y vuelve el diseño de siempre; borrar el equipo también la borra', async () => {
+    const t = await newTeam(B);
+    await send(as(B).put(`/api/teams/${t}/cover`)).expect(200);
+    await as(B).patch(`/api/teams/${t}`).send({ coverPosition: { x: 10, y: 90 } }).expect(200);
+    const pid = (await cover(t)).coverPublicId;
+    const del = await as(B).delete(`/api/teams/${t}/cover`).expect(200);
+    expect(del.body).toMatchObject({ coverUrl: null, coverPosition: { x: 50, y: 50 } });
+    expect(destroy).toHaveBeenCalledWith(pid);
+    await send(as(B).put(`/api/teams/${t}/cover`)).expect(200);
+    const pid2 = (await cover(t)).coverPublicId;
+    await as(B).delete(`/api/teams/${t}`).expect(204);
+    expect(destroy).toHaveBeenCalledWith(pid2);
+  });
+});

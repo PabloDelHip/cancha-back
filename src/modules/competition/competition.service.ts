@@ -171,20 +171,8 @@ export class CompetitionService {
         await this.tournaments.updateOne({ _id: toObjectId(id) }, { $set: { phases: [...phases, phase] } }, { session });
         return;
       }
-      if (!view.next.ready) {
-        throw new ConflictException({ statusCode: 409, error: 'Conflict', message: view.next.blockers.join('. '), blockers: view.next.blockers });
-      }
       const tid = toObjectId(id);
-      const roundBase = await this.nextRoundNumber(tid, session);
-      const s = { ...DEFAULT_SETTINGS, ...tournament.settings };
-      const plan = planKnockout(view.next.index, view.next.seeds!, s.knockoutLegs, {
-        startDate: dto.startDate,
-        daysBetweenRounds: dto.daysBetweenRounds,
-        firstKickoff: dto.firstKickoff,
-        minutesBetweenMatches: dto.minutesBetweenMatches,
-        venue: dto.venue?.trim() || null,
-      }, roundBase, s.reseed ?? false);
-      if (roundBase + plan.rounds.length - 1 > 99) throw new BadRequestException('La eliminatoria superaría la jornada 99');
+      const plan = planNextKnockout(view, tournament.settings, dto, await this.nextRoundNumber(tid, session));
       await this.rounds.insertMany(plan.rounds.map((r) => ({ tournamentId: tid, ...r })), { session });
       if (plan.matches.length) await this.matches.insertMany(plan.matches.map((m) => matchDoc(tid, m)), { session });
       await this.tournaments.updateOne({ _id: tid }, { $set: { phases: [...phases, plan.phase!] } }, { session });
@@ -192,8 +180,34 @@ export class CompetitionService {
     return this.structure(id);
   }
 
+  /**
+   * POST /tournaments/:id/phases/advance/preview: la eliminatoria que se generaría con los
+   * clasificados (cruces, quién pasa directo y fechas), SIN guardar nada. El organizador decide si
+   * la usa (advance) o la arma a mano.
+   */
+  async previewAdvance(id: string, dto: AdvancePhaseDto, user: AuthUser) {
+    await this.ownership.tournament(id, user);
+    const { tournament, input, teamMap } = await this.context(id);
+    assertFullCoverage(tournament);
+    const view = buildStructure({ ...input, phases: mergeTiebreaks(tournament.phases ?? [], dto.tiebreaks ?? []) });
+    if (!view.next) throw new ConflictException('Este torneo no tiene otra fase por generar');
+    const plan = planNextKnockout(view, tournament.settings, dto, await this.nextRoundNumber(toObjectId(id), null));
+    const phase = plan.phase!;
+    const size = bracketSize(phase);
+    return {
+      seeds: phase.seeds ?? [],
+      reseed: !!phase.reseed,
+      rounds: Array.from({ length: phaseRounds(phase) }, (_, r) => ({
+        name: roundName(size / 2 ** r),
+        ties: (phase.bracket ?? []).filter((t) => t.round === r).map((t) => ({ slot: t.slot, home: t.home, away: t.away })),
+      })),
+      matches: plan.matches.map((m) => ({ homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId, date: m.date, time: m.time, roundName: plan.rounds.find((x) => x.number === m.round)?.name ?? null })),
+      teams: Object.fromEntries(teamMap),
+    };
+  }
+
   /** Primera jornada libre después de todo lo programado. */
-  private async nextRoundNumber(tid: Types.ObjectId, session: ClientSession) {
+  private async nextRoundNumber(tid: Types.ObjectId, session: ClientSession | null) {
     const [lastRound, lastMatch] = await Promise.all([
       this.rounds.findOne({ tournamentId: tid }).sort({ number: -1 }).select('number').session(session).lean(),
       this.matches.findOne({ tournamentId: tid }).sort({ round: -1 }).select('round').session(session).lean(),
@@ -485,3 +499,21 @@ function mergeTiebreaks(phases: TournamentPhase[], tiebreaks: TiebreakDecision[]
 }
 
 const sameSet = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
+
+/** Eliminatoria automática con los clasificados (o 409 con lo que falta). Compartido por advance y su vista previa. */
+function planNextKnockout(view: ReturnType<typeof buildStructure>, settings: Partial<typeof DEFAULT_SETTINGS> | undefined, dto: AdvancePhaseDto, roundBase: number) {
+  if (!view.next?.ready) {
+    const blockers = view.next?.blockers ?? [];
+    throw new ConflictException({ statusCode: 409, error: 'Conflict', message: blockers.join('. '), blockers });
+  }
+  const s = { ...DEFAULT_SETTINGS, ...settings };
+  const plan = planKnockout(view.next.index, view.next.seeds!, s.knockoutLegs, {
+    startDate: dto.startDate,
+    daysBetweenRounds: dto.daysBetweenRounds,
+    firstKickoff: dto.firstKickoff,
+    minutesBetweenMatches: dto.minutesBetweenMatches,
+    venue: dto.venue?.trim() || null,
+  }, roundBase, s.reseed ?? false);
+  if (roundBase + plan.rounds.length - 1 > 99) throw new BadRequestException('La eliminatoria superaría la jornada 99');
+  return plan;
+}

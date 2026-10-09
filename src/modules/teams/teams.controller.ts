@@ -107,6 +107,32 @@ export class TeamsController {
     return this.service.setLogo(id, file, user);
   }
 
+  @Put('teams/:id/cover')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(IMAGE_FILE_BODY)
+  @ApiOperation({
+    summary: 'Subir o reemplazar la foto de portada del equipo (Cloudinary)',
+    description: 'Campo `file`: JPG, PNG, WebP, GIF o AVIF, máx. 5 MB. Se guarda completa (máx. 1920 px); el encuadre se ajusta con PATCH coverPosition. OWNER, MANAGER o custodio sin OWNER.',
+  })
+  @ApiForbiddenResponse({ description: 'No administras este equipo' })
+  @UseInterceptors(FileInterceptor('file', imageUploadOptions))
+  setCover(
+    @Param('id', IsObjectIdPipe) id: string,
+    @UploadedFile() file: UploadedImage | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.setCover(id, file, user);
+  }
+
+  @Delete('teams/:id/cover')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Quitar la foto de portada (vuelve el diseño con los colores del equipo)' })
+  @ApiForbiddenResponse({ description: 'No administras este equipo' })
+  removeCover(@Param('id', IsObjectIdPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.service.removeCover(id, user);
+  }
+
   @Delete('teams/:id/logo')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Quitar el logo del equipo (y borrarlo de Cloudinary si se subió aquí)' })
