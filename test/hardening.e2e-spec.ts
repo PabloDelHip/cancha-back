@@ -143,7 +143,7 @@ describe('DRAFT: sin actividad deportiva (requests directos a la API)', () => {
     x.matchHome = first.homeTeamId;
     x.matchAway = first.awayTeamId;
     // Reprogramar un partido (fecha/hora/sede) también es preparación.
-    await as(A).patch(`/api/matches/${x.match}`).send({ date: '2027-03-07', time: '10:00', venue: 'Cancha 2' }).expect(200);
+    await as(A).patch(`/api/matches/${x.match}`).send({ reason: 'Motivo de prueba', date: '2027-03-07', time: '10:00', venue: 'Cancha 2' }).expect(200);
   });
 
   it('no se captura resultado (ni marcador solo, ni con estadísticas, ni como LIVE)', async () => {
@@ -166,16 +166,16 @@ describe('DRAFT: sin actividad deportiva (requests directos a la API)', () => {
   it('un partido no pasa a LIVE, ni al crearlo ni por PATCH', async () => {
     const res = await newMatch(x.id, 5, x.home, x.away, { status: 'LIVE' }).expect(409);
     expect(res.body.message).toMatch(notStarted);
-    expect((await as(A).patch(`/api/matches/${x.match}`).send({ status: 'LIVE' }).expect(409)).body.message).toMatch(
+    expect((await as(A).patch(`/api/matches/${x.match}`).send({ reason: 'Motivo de prueba', status: 'LIVE' }).expect(409)).body.message).toMatch(
       notStarted,
     );
   });
 
   it('no se finaliza un partido por una ruta alternativa (PATCH status FINISHED)', async () => {
-    const res = await as(A).patch(`/api/matches/${x.match}`).send({ status: 'FINISHED' }).expect(409);
+    const res = await as(A).patch(`/api/matches/${x.match}`).send({ reason: 'Motivo de prueba', status: 'FINISHED' }).expect(409);
     expect(res.body.message).toMatch(notStarted);
     // PATCH no admite marcador: los campos de resultado solo existen en PUT /result.
-    await as(A).patch(`/api/matches/${x.match}`).send({ homeScore: 3, awayScore: 0 }).expect(400);
+    await as(A).patch(`/api/matches/${x.match}`).send({ reason: 'Motivo de prueba', homeScore: 3, awayScore: 0 }).expect(400);
   });
 
   it('no se cuela un partido jugado moviéndolo desde un torneo ACTIVE', async () => {
@@ -185,10 +185,10 @@ describe('DRAFT: sin actividad deportiva (requests directos a la API)', () => {
     const played = await match(active, 1, x.home, x.away);
     await result(played, 2, 1).expect(200);
     const live = await match(active, 2, x.away, x.home);
-    await as(A).patch(`/api/matches/${live}`).send({ status: 'LIVE' }).expect(200);
+    await as(A).patch(`/api/matches/${live}`).send({ reason: 'Motivo de prueba', status: 'LIVE' }).expect(200);
 
-    await as(A).patch(`/api/matches/${played}`).send({ tournamentId: x.id, round: 9 }).expect(409);
-    const res = await as(A).patch(`/api/matches/${live}`).send({ tournamentId: x.id, round: 9 }).expect(409);
+    await as(A).patch(`/api/matches/${played}`).send({ reason: 'Motivo de prueba', tournamentId: x.id, round: 9 }).expect(409);
+    const res = await as(A).patch(`/api/matches/${live}`).send({ reason: 'Motivo de prueba', tournamentId: x.id, round: 9 }).expect(409);
     expect(res.body.message).toMatch(notStarted);
     expect((await matchesOf(x.id)).some((m) => m.id === played || m.id === live)).toBe(false);
   });
@@ -206,13 +206,13 @@ describe('DRAFT: sin actividad deportiva (requests directos a la API)', () => {
 
   it('pospuesto/cancelado siguen siendo decisiones de programación válidas en DRAFT', async () => {
     const other = (await matchesOf(x.id)).find((m) => m.id !== x.match)!;
-    await as(A).patch(`/api/matches/${other.id}`).send({ status: 'POSTPONED' }).expect(200);
-    await as(A).patch(`/api/matches/${other.id}`).send({ status: 'SCHEDULED' }).expect(200);
+    await as(A).patch(`/api/matches/${other.id}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(200);
+    await as(A).patch(`/api/matches/${other.id}`).send({ reason: 'Motivo de prueba', status: 'SCHEDULED' }).expect(200);
   });
 
   it('ACTIVE: los mismos flujos sí funcionan', async () => {
     await as(A).post(`/api/tournaments/${x.id}/start`).expect(200);
-    await as(A).patch(`/api/matches/${x.match}`).send({ status: 'LIVE' }).expect(200);
+    await as(A).patch(`/api/matches/${x.match}`).send({ reason: 'Motivo de prueba', status: 'LIVE' }).expect(200);
     const scorerTeam = x.home;
     const homeGoals = x.matchHome === scorerTeam ? 2 : 0;
     const awayGoals = x.matchAway === scorerTeam ? 2 : 0;
@@ -262,8 +262,8 @@ describe('Concurrencia: un equipo no juega dos veces en la misma jornada', () =>
     await round(id, 8);
     slowDown(ctx.app.get(MatchesService), 'assertRoundAvailable', 300);
 
-    const [a, b] = await interleave(as(A).patch(`/api/matches/${m1}`).send({ round: 8 }), () =>
-      as(A).patch(`/api/matches/${m2}`).send({ round: 8 }),
+    const [a, b] = await interleave(as(A).patch(`/api/matches/${m1}`).send({ reason: 'Motivo de prueba', round: 8 }), () =>
+      as(A).patch(`/api/matches/${m2}`).send({ reason: 'Motivo de prueba', round: 8 }),
     );
     expect([a.status, b.status]).toEqual([200, 409]);
     expect((await matchesOf(id)).filter((m) => m.round === 8).map((m) => m.id)).toEqual([m1]);
@@ -273,11 +273,11 @@ describe('Concurrencia: un equipo no juega dos veces en la misma jornada', () =>
     const id = await tournament('ACTIVE');
     const [tigres, america, atlas] = await teams(id, 3);
     const cancelled = await match(id, 5, tigres, atlas);
-    await as(A).patch(`/api/matches/${cancelled}`).send({ status: 'CANCELLED' }).expect(200);
+    await as(A).patch(`/api/matches/${cancelled}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(200);
     slowDown(ctx.app.get(MatchesService), 'assertRoundAvailable', 300);
 
     const [a, b] = await interleave(newMatch(id, 5, tigres, america), () =>
-      as(A).patch(`/api/matches/${cancelled}`).send({ status: 'SCHEDULED' }),
+      as(A).patch(`/api/matches/${cancelled}`).send({ reason: 'Motivo de prueba', status: 'SCHEDULED' }),
     );
     expect([a.status, b.status]).toEqual([201, 409]);
     const vigentes = (await matchesOf(id)).filter((m) => m.round === 5 && m.status !== 'CANCELLED');
@@ -291,8 +291,8 @@ describe('Concurrencia: un equipo no juega dos veces en la misma jornada', () =>
     const m2 = await match(id, 4, pumas, chivas);
     slowDown(ctx.app.get(MatchesService), 'assertRoundAvailable', 300);
 
-    const [a, b] = await interleave(as(A).patch(`/api/matches/${m1}`).send({ homeTeamId: tigres }), () =>
-      as(A).patch(`/api/matches/${m2}`).send({ awayTeamId: tigres }),
+    const [a, b] = await interleave(as(A).patch(`/api/matches/${m1}`).send({ reason: 'Motivo de prueba', homeTeamId: tigres }), () =>
+      as(A).patch(`/api/matches/${m2}`).send({ reason: 'Motivo de prueba', awayTeamId: tigres }),
     );
     expect([a.status, b.status]).toEqual([200, 409]);
     const withTigres = (await matchesOf(id)).filter(
@@ -468,9 +468,9 @@ describe('GET /tournaments/:id/standings (fuente de verdad del frontend)', () =>
     await result(await match(id, 2, c, d), 3, 0).expect(200);
     // No cuentan:
     const postponed = await match(id, 3, a, c);
-    await as(A).patch(`/api/matches/${postponed}`).send({ status: 'POSTPONED' }).expect(200);
+    await as(A).patch(`/api/matches/${postponed}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(200);
     const cancelled = await match(id, 3, b, d);
-    await as(A).patch(`/api/matches/${cancelled}`).send({ status: 'CANCELLED' }).expect(200);
+    await as(A).patch(`/api/matches/${cancelled}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(200);
     await result(await match(id, 4, d, a), 5, 0, [], { status: 'LIVE' }).expect(200);
 
     const t310 = await table(id);

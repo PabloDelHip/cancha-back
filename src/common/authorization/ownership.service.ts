@@ -16,6 +16,14 @@ import { Team } from '../../modules/teams/schemas/team.schema.js';
 import { TeamMembership } from '../../modules/players/schemas/team-membership.schema.js';
 import type { AuthUser } from '../../modules/auth/auth.types.js';
 import { TeamAdminRole, TeamAdminStatus, TeamRosterStatus, TournamentStatus } from '../enums/index.js';
+import { TournamentAccessService } from './tournament-access.service.js';
+import type { Permission } from './permissions.js';
+
+/** Quién y con qué permiso escribe (se revalida dentro de la transacción). */
+export interface Access {
+  user: AuthUser;
+  permission: Permission;
+}
 
 export const TOURNAMENT_FINISHED_MESSAGE =
   'El torneo está finalizado y no puede modificarse (Tournament is finished and cannot be modified)';
@@ -26,8 +34,10 @@ export const TOURNAMENT_NOT_STARTED_MESSAGE =
 /**
  * Políticas de escritura (ver README → "Ownership"):
  *
- * - Torneo: solo su organizador (organizerId). Sus inscripciones, jornadas, partidos,
- *   resultados y estadísticas heredan esa propiedad: Match → Tournament → organizerId.
+ * - Torneo (RBAC): su propietario (organizerId, implícito, todos los permisos) y sus
+ *   colaboradores activos (tournament_members: ADMIN, COORDINATOR, SCORER) según la matriz de
+ *   `permissions.ts`. Cada método recibe el PERMISO que exige la operación. Inscripciones,
+ *   jornadas, partidos, resultados y estadísticas heredan el acceso: Match → Tournament.
  * - Torneo FINISHED = historial inmutable: `tournament()` y `match()` (la puerta de TODAS las
  *   escrituras deportivas) responden 409. Solo `ownedTournament()` lo deja pasar, para las
  *   acciones de ciclo de vida que deciden por sí mismas qué transición es válida.
@@ -64,19 +74,28 @@ export class OwnershipService {
     @InjectModel(Team.name) private readonly teams: Model<Team>,
     @InjectModel(TeamMembership.name) private readonly memberships: Model<TeamMembership>,
     @InjectConnection() private readonly connection: Connection,
+    private readonly access: TournamentAccessService,
   ) {}
 
   /**
    * Ejecuta `fn` en una transacción con el cerrojo del torneo tomado. `fn` puede ejecutarse
    * más de una vez (reintentos por conflicto): solo debe tocar la base con `session`.
+   *
+   * `access` (RBAC): el permiso se vuelve a comprobar DENTRO de la transacción, después del
+   * cerrojo. Revocar a un colaborador también toma el cerrojo, así que una operación suya que se
+   * cruce con la revocación se reintenta y ya ve el acceso retirado (403). `null` = flujos que
+   * no son de colaboradores (quien se inscribe por enlace, la plantilla desde el equipo).
    */
   inTournament<T>(
     tournamentId: string | Types.ObjectId,
+    access: Access | null,
     fn: (session: ClientSession, status: TournamentStatus) => Promise<T>,
   ): Promise<T> {
-    return this.connection.transaction(async (session) =>
-      fn(session, await this.lock(tournamentId, session)),
-    );
+    return this.connection.transaction(async (session) => {
+      const status = await this.lock(tournamentId, session);
+      if (access) await this.access.require(tournamentId, access.user.id, access.permission, session);
+      return fn(session, status);
+    });
   }
 
   /**
@@ -98,38 +117,35 @@ export class OwnershipService {
     throw new ConflictException(TOURNAMENT_FINISHED_MESSAGE);
   }
 
-  /** Escritura sobre el torneo o lo que cuelga de él: dueño y torneo no finalizado. */
-  async tournament(id: string | Types.ObjectId, user: AuthUser) {
-    const tournament = await this.ownedTournament(id, user);
+  /**
+   * Cerrojo sin la regla de inmutabilidad (también en torneos finalizados): para cambios de
+   * acceso, que deben poder revocarse siempre.
+   */
+  async lockAny(tournamentId: string | Types.ObjectId, session: ClientSession) {
+    const locked = await this.tournaments
+      .findOneAndUpdate({ _id: tournamentId }, { $inc: { writeSeq: 1 } }, { session, timestamps: false, projection: { status: 1, organizerId: 1 } })
+      .lean();
+    if (!locked) throw new NotFoundException(`Torneo ${tournamentId} no encontrado`);
+    return locked;
+  }
+
+  /** Escritura sobre el torneo o lo que cuelga de él: permiso y torneo no finalizado. */
+  async tournament(id: string | Types.ObjectId, user: AuthUser, permission: Permission) {
+    const tournament = await this.ownedTournament(id, user, permission);
     assertNotFinished(tournament.status);
     return tournament;
   }
 
-  /** Solo propiedad (sin la regla de inmutabilidad): para iniciar/finalizar. */
-  async ownedTournament(id: string | Types.ObjectId, user: AuthUser) {
-    const tournament = await this.tournaments.findById(id).lean();
-    if (!tournament) throw new NotFoundException(`Torneo ${id} no encontrado`);
-    if (!isOwner(tournament.organizerId, user)) {
-      throw new ForbiddenException(
-        'No tienes permiso para modificar este torneo',
-      );
-    }
-    return tournament;
+  /** Solo el permiso (sin la regla de inmutabilidad): lecturas y ciclo de vida. */
+  async ownedTournament(id: string | Types.ObjectId, user: AuthUser, permission: Permission) {
+    return (await this.access.require(id, user.id, permission)).tournament;
   }
 
-  /** Escritura sobre un partido (datos, estado, resultado, estadísticas). */
-  async match(id: string, user: AuthUser) {
+  /** Escritura sobre un partido (datos, estado, resultado, estadísticas): permiso en su torneo. */
+  async match(id: string, user: AuthUser, permission: Permission) {
     const match = await this.matches.findById(id).lean();
     if (!match) throw new NotFoundException(`Partido ${id} no encontrado`);
-    const tournament = await this.tournaments
-      .findById(match.tournamentId)
-      .select('organizerId status')
-      .lean();
-    if (!tournament || !isOwner(tournament.organizerId, user)) {
-      throw new ForbiddenException(
-        'No tienes permiso para modificar partidos de este torneo',
-      );
-    }
+    const { tournament } = await this.access.require(match.tournamentId, user.id, permission);
     assertNotFinished(tournament.status);
     return match;
   }

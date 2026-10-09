@@ -20,7 +20,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { MatchStatus } from '../../../common/enums/index.js';
+import { MatchStatus, SendOff } from '../../../common/enums/index.js';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto.js';
 import { IsISODateOnly, IsTime, Trim } from '../../../common/validators.js';
 
@@ -66,6 +66,15 @@ export class CreateMatchDto {
   venue?: string | null;
 
   @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description: 'Cancha de una sede del organizador. Con cancha, `venue` se deriva de ella. null = quitarla.',
+  })
+  @IsOptional()
+  @IsMongoId()
+  fieldId?: string | null;
+
+  @ApiPropertyOptional({
     enum: CREATABLE_STATUSES,
     default: MatchStatus.SCHEDULED,
   })
@@ -80,6 +89,17 @@ export class CreateMatchDto {
 export class UpdateMatchDto extends PartialType(
   OmitType(CreateMatchDto, ['status'] as const),
 ) {
+  @ApiPropertyOptional({
+    nullable: true,
+    maxLength: 300,
+    description: 'Motivo (queda en el historial). Obligatorio con el torneo en curso al cambiar fecha u hora, posponer o cancelar.',
+  })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(300)
+  reason?: string | null;
+
   @ApiPropertyOptional({
     enum: MatchStatus,
     description: 'FINISHED solo si el partido ya tiene marcador',
@@ -154,6 +174,16 @@ export class PlayerStatInputDto {
   @Min(0)
   @Max(1)
   redCards: number;
+
+  @ApiPropertyOptional({
+    enum: SendOff,
+    nullable: true,
+    description:
+      'Tipo de expulsión: DIRECT (roja directa, con 0 o 1 amarilla previa), SECOND_YELLOW (2 amarillas + roja) o null (sin expulsión). Si se omite, la fila queda sin clasificar y no genera sanción automática.',
+  })
+  @IsOptional()
+  @IsEnum(SendOff)
+  sendOff?: SendOff | null;
 }
 
 const RESULT_STATUSES = [MatchStatus.LIVE, MatchStatus.FINISHED] as const;

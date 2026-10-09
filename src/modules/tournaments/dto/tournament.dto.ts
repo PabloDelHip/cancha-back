@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType, PartialType, PickType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -11,6 +11,8 @@ import {
   IsMongoId,
   IsNotEmpty,
   IsOptional,
+  IsObject,
+  ValidateIf,
   IsString,
   Max,
   MaxLength,
@@ -24,6 +26,11 @@ import {
   TournamentFormat,
   TournamentStatus,
 } from '../../../common/enums/index.js';
+
+import { TournamentInformationDto } from './tournament-information.dto.js';
+import { UpdateRegistrationSettingsDto } from '../../registration/dto/registration.dto.js';
+
+export class TournamentRegistrationInfoDto extends PickType(UpdateRegistrationSettingsDto, ['deadline', 'maxTeams'] as const) {}
 
 /**
  * Configuración deportiva: formato y puntuación. La coherencia entre valores (victoria > empate ≥
@@ -184,13 +191,27 @@ export class CreateTournamentDto {
   @Type(() => TournamentSettingsDto)
   settings?: TournamentSettingsDto;
 
+  @ApiPropertyOptional({ type: TournamentInformationDto })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => TournamentInformationDto)
+  information?: TournamentInformationDto;
+
+  @ApiPropertyOptional({ type: TournamentRegistrationInfoDto })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => TournamentRegistrationInfoDto)
+  registration?: TournamentRegistrationInfoDto;
+
   @ApiPropertyOptional({
     enum: DataCoverage,
     default: DataCoverage.FULL,
-    description: 'FULL: competición completa. PARTIAL: solo se sigue a algunos equipos (sin tabla ni goleadores globales).',
+    description: 'Competición completa. Campo conservado para compatibilidad.',
   })
   @IsOptional()
-  @IsEnum(DataCoverage, { message: 'dataCoverage debe ser FULL o PARTIAL' })
+  @IsEnum(DataCoverage, { message: 'Solo se admite cobertura FULL' })
   dataCoverage?: DataCoverage;
 }
 
@@ -199,11 +220,11 @@ export class UpdateTournamentDto extends PartialType(OmitType(CreateTournamentDt
   @ApiPropertyOptional({
     type: [String],
     description:
-      'Solo cobertura PARTIAL: equipos en seguimiento (deben estar inscritos en el torneo; sin repetidos). Reemplaza la lista completa. En FULL se vacía sola.',
+      'Campo obsoleto: solo se admite una lista vacía.',
   })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(128)
+  @ArrayMaxSize(0)
   @ArrayUnique({ message: 'trackedTeamIds no puede repetir equipos' })
   @IsMongoId({ each: true, message: 'trackedTeamIds debe contener ids de equipo válidos' })
   trackedTeamIds?: string[];
@@ -215,6 +236,13 @@ export class UpdateTournamentDto extends PartialType(OmitType(CreateTournamentDt
   @IsOptional()
   @IsBoolean()
   resetSchedule?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Confirmación explícita para borrar partidos con cancha o árbitros asignados (se liberan esas asignaciones).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  releaseAssignments?: boolean;
 }
 
 export class FinishTournamentDto {

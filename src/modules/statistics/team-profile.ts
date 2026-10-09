@@ -22,9 +22,6 @@
  *   FINISHED. Liga: líder verificable de la tabla final. Eliminación, grupos + eliminación y liga +
  *   playoffs: ganador de la final. Ser 1º de la fase regular NO es ser campeón. Se calcula, no se guarda.
  * - Asistidores (6F): como los goleadores, solo con esta camiseta (assists > 0).
- * - Cobertura PARTIAL (6F): sus partidos cuentan igual en balance, forma, partidos, goleadores y
- *   asistidores (son reales), pero no hay posición en la tabla, posición final ni título: dependen
- *   de conocer los partidos de TODOS los participantes.
  */
 import { CompetitionSystem, KnockoutTiebreak, MatchStatus, PhaseType, PlayerPosition } from '../../common/enums/index.js';
 import type { PublicPlayer, TeamRef, TournamentRef } from '../../common/utils/public.js';
@@ -160,8 +157,8 @@ export function buildTeamProfile(input: TeamProfileInput) {
     .map((t) => {
       const all = input.tournamentMatches.get(t.id) ?? [];
       const current = t.status !== 'FINISHED' && input.enrolledTournamentIds.has(t.id);
-      const global = t.dataCoverage !== 'PARTIAL'; // tablas y títulos solo con la competición completa
-      const hasResults = global && all.some(isFinished);
+
+      const hasResults = all.some(isFinished);
       const structure = buildStructure({
         system: t.system as CompetitionSystem,
         points: t.points,
@@ -185,16 +182,16 @@ export function buildTeamProfile(input: TeamProfileInput) {
       const ko = structure.phases.find((p) => p.type === PhaseType.KNOCKOUT);
       const final = ko?.type === PhaseType.KNOCKOUT ? ko.rounds.at(-1)?.ties[0] : undefined;
       const runnerUp =
-        global && t.status === 'FINISHED' && !!final?.winnerTeamId && final.winnerTeamId !== team.id && (final.homeTeamId === team.id || final.awayTeamId === team.id);
+        t.status === 'FINISHED' && !!final?.winnerTeamId && final.winnerTeamId !== team.id && (final.homeTeamId === team.id || final.awayTeamId === team.id);
       const { system: _system, points: _points, phases: _phases, playoffTeams: _p, qualifiersPerGroup: _q, knockoutTiebreak: _k, finalTiebreak: _f, ...tournament } = t;
       return {
-        tournament,
+        tournament: { ...tournament, dataCoverage: 'FULL' as const },
         system: t.system,
         current,
         record: recordOf(team.id, all),
         standing: current && row ? { position: row.position, teams: rows.length, points: row.points } : null,
         finalStanding: classic && hasResults ? verifiableFinal(team.id, t, all, leagueRows) : null,
-        champion: global && t.status === 'FINISHED' && structure.championTeamId === team.id,
+        champion: t.status === 'FINISHED' && structure.championTeamId === team.id,
         runnerUp,
       };
     })

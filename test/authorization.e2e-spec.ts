@@ -219,7 +219,7 @@ describe('Partidos y resultados', () => {
       .expect(403);
     await as(A)
       .patch(`/api/matches/${A.match}`)
-      .send({ time: '19:30' })
+      .send({ time: '19:30', reason: 'Motivo de prueba' })
       .expect(200);
   });
 

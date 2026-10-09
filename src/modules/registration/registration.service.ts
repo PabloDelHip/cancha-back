@@ -24,6 +24,7 @@ import {
   TournamentStatus,
 } from '../../common/enums/index.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
+import { Permission } from '../../common/authorization/permissions.js';
 import { TeamAccessService } from '../../common/authorization/team-access.service.js';
 import { publicPlayer, teamRef } from '../../common/utils/public.js';
 import { todayISODate } from '../../common/utils/dates.js';
@@ -32,6 +33,8 @@ import { deriveShortName } from '../teams/teams.service.js';
 import type { CreateTeamDto } from '../teams/dto/team.dto.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import type { EnvConfig } from '../../config/env.validation.js';
+import { mergeInformation, validateInformation } from '../tournaments/tournament-information.js';
+import type { TournamentInformation } from '../tournaments/schemas/tournament-information.schema.js';
 import type { SaveRegistrationDraftDto, SubmitRegistrationDto, UpdateRegistrationSettingsDto } from './dto/registration.dto.js';
 import {
   decryptRegistrationToken,
@@ -60,7 +63,7 @@ export interface SelectionProblem {
   playerIds?: string[];
 }
 
-type LeanTournament = { _id: Types.ObjectId; status: TournamentStatus; registration?: TournamentRegistrationSettings | null };
+type LeanTournament = { _id: Types.ObjectId; status: TournamentStatus; registration?: TournamentRegistrationSettings | null; information?: TournamentInformation };
 type LeanRequest = RegistrationRequest & { _id: Types.ObjectId };
 
 /**
@@ -118,7 +121,7 @@ export class RegistrationService {
   // ─── Organizador: configuración y enlace ──────────────────────────────────
 
   async settings(tournamentId: string, user: AuthUser) {
-    const t = await this.ownership.ownedTournament(tournamentId, user);
+    const t = await this.ownership.ownedTournament(tournamentId, user, Permission.TEAMS);
     const id = t._id;
     const [link, enrolled, counts] = await Promise.all([
       this.links.findOne({ tournamentId: id, status: RegistrationLinkStatus.ACTIVE }).select('+tokenCiphertext createdAt').lean(),
@@ -137,11 +140,12 @@ export class RegistrationService {
   }
 
   async updateSettings(tournamentId: string, dto: UpdateRegistrationSettingsDto, user: AuthUser) {
-    await this.ownership.tournament(tournamentId, user);
-    await this.ownership.inTournament(tournamentId, async (session) => {
-      const t = await this.tournaments.findById(tournamentId).select('status registration').session(session).lean<LeanTournament>();
+    await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
+      const t = await this.tournaments.findById(tournamentId).select('status registration information').session(session).lean<LeanTournament>();
       const patch = Object.fromEntries(Object.entries(dto).filter(([, v]) => v !== undefined));
       const next = { ...this.settingsOf(t!), ...patch, approvalRequired: true };
+      validateInformation(mergeInformation(t!.information), next.deadline);
       if (next.minPlayers !== null && next.maxPlayers !== null && next.minPlayers > next.maxPlayers) {
         throw new BadRequestException('El mínimo de jugadores no puede ser mayor que el máximo');
       }
@@ -156,9 +160,9 @@ export class RegistrationService {
 
   /** Genera (o regenera) el enlace: revoca el ACTIVE anterior y crea otro en la misma transacción. */
   async generateLink(tournamentId: string, user: AuthUser) {
-    await this.ownership.tournament(tournamentId, user);
+    await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
     const token = newRegistrationToken();
-    await this.ownership.inTournament(tournamentId, async (session) => {
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
       const id = toObjectId(tournamentId);
       await this.links.updateMany(
         { tournamentId: id, status: RegistrationLinkStatus.ACTIVE },
@@ -175,7 +179,7 @@ export class RegistrationService {
 
   /** Revoca el enlace activo. Las solicitudes ya enviadas se conservan y se siguen revisando. */
   async revokeLink(tournamentId: string, user: AuthUser) {
-    const t = await this.ownership.ownedTournament(tournamentId, user);
+    const t = await this.ownership.ownedTournament(tournamentId, user, Permission.TEAMS);
     const res = await this.links.updateOne(
       { tournamentId: t._id, status: RegistrationLinkStatus.ACTIVE },
       { $set: { status: RegistrationLinkStatus.REVOKED, revokedAt: new Date(), revokedBy: toObjectId(user.id) } },
@@ -186,7 +190,7 @@ export class RegistrationService {
   // ─── Organizador: solicitudes ─────────────────────────────────────────────
 
   async listRequests(tournamentId: string, status: RegistrationRequestStatus | undefined, user: AuthUser) {
-    const t = await this.ownership.ownedTournament(tournamentId, user);
+    const t = await this.ownership.ownedTournament(tournamentId, user, Permission.TEAMS);
     const [rows, counts] = await Promise.all([
       this.requests.find({ tournamentId: t._id, ...(status ? { status } : {}) }).sort({ createdAt: -1, _id: -1 }).lean<LeanRequest[]>(),
       this.countsOf(t._id),
@@ -195,7 +199,7 @@ export class RegistrationService {
   }
 
   async getRequest(tournamentId: string, requestId: string, user: AuthUser) {
-    const t = await this.ownership.ownedTournament(tournamentId, user);
+    const t = await this.ownership.ownedTournament(tournamentId, user, Permission.TEAMS);
     return this.detail(t, requestId);
   }
 
@@ -206,8 +210,8 @@ export class RegistrationService {
    * solicitud o último cupo) se serializan: la segunda ve el resultado de la primera.
    */
   async approve(tournamentId: string, requestId: string, user: AuthUser) {
-    const owned = await this.ownership.tournament(tournamentId, user);
-    await this.ownership.inTournament(tournamentId, async (session) => {
+    const owned = await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
       const request = await this.requests.findOne({ _id: toObjectId(requestId), tournamentId: owned._id }).session(session).lean<LeanRequest>();
       if (!request) throw new NotFoundException('Solicitud no encontrada');
       if (request.status !== PENDING) throw new ConflictException(this.notPendingMessage(request.status));
@@ -232,7 +236,7 @@ export class RegistrationService {
   }
 
   async reject(tournamentId: string, requestId: string, reason: string | null | undefined, user: AuthUser) {
-    const t = await this.ownership.tournament(tournamentId, user);
+    const t = await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
     const res = await this.requests.updateOne(
       { _id: toObjectId(requestId), tournamentId: t._id, status: PENDING },
       { $set: { status: RegistrationRequestStatus.REJECTED, reviewedAt: new Date(), reviewedBy: toObjectId(user.id), rejectionReason: reason?.trim() || null } },

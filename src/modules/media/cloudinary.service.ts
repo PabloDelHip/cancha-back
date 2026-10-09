@@ -15,6 +15,7 @@ export interface ImagePreset {
 }
 
 export const IMAGE_PRESETS = {
+  tournamentLogo: { folder: 'kikovo/tournaments', incoming: 'c_limit,w_512,h_512', delivery: 'f_auto,q_auto' },
   playerPhoto: { folder: 'kikovo/players', incoming: 'c_limit,w_800,h_800', delivery: 'f_auto,q_auto' },
   teamLogo: { folder: 'kikovo/teams', incoming: 'c_limit,w_512,h_512', delivery: 'f_auto,q_auto' },
   // Portada: se guarda la foto completa (el encuadre lo hace cada pantalla con coverPosition).

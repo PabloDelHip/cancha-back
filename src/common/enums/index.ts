@@ -10,16 +10,9 @@ export enum TournamentFormat {
   FOOTBALL_11 = 'FOOTBALL_11',
 }
 
-/**
- * Cobertura de datos de un torneo (6F), independiente de su estado:
- * - FULL: Cancha conoce la competición completa → tabla, goleadores y estructura globales.
- * - PARTIAL: solo se sigue a algunos equipos → sin rankings globales; los partidos registrados
- *   siguen alimentando equipos y jugadores.
- * Documentos anteriores sin el campo = FULL (ver coverageOf).
- */
+/** Campo de compatibilidad: todos los torneos tienen cobertura completa. */
 export enum DataCoverage {
   FULL = 'FULL',
-  PARTIAL = 'PARTIAL',
 }
 
 /** Ciclo de vida: DRAFT → ACTIVE → FINISHED (terminal: historial inmutable). */
@@ -128,4 +121,130 @@ export enum RegistrationRequestStatus {
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED',
   CANCELLED = 'CANCELLED',
+}
+
+/**
+ * Expulsión registrada en la captura (PlayerMatchStats.sendOff). Capturas anteriores al módulo
+ * disciplinario no tienen el campo: si tienen roja o dos amarillas quedan "por clasificar".
+ */
+export enum SendOff {
+  DIRECT = 'DIRECT',
+  SECOND_YELLOW = 'SECOND_YELLOW',
+}
+
+/** Qué hacer si se captura como jugado a un suspendido: avisar (y registrar) o rechazar. */
+export enum EligibilityMode {
+  WARN = 'WARN',
+  BLOCK = 'BLOCK',
+}
+
+export enum SanctionKind {
+  /** Derivada del reglamento y las tarjetas; solo se persiste si el organizador la ajusta. */
+  AUTO = 'AUTO',
+  MANUAL = 'MANUAL',
+}
+
+export enum SanctionCause {
+  ACCUMULATION = 'ACCUMULATION',
+  DIRECT_RED = 'DIRECT_RED',
+  SECOND_YELLOW = 'SECOND_YELLOW',
+  MANUAL = 'MANUAL',
+}
+
+/**
+ * - ACTIVE: faltan partidos y el equipo tiene partidos programados para cumplirla.
+ * - PENDING: faltan partidos pero no hay ninguno programado (eliminado, calendario sin generar o
+ *   torneo finalizado). No se transfiere a otro torneo.
+ * - SERVED: cumplida. ANNULLED: anulada por el organizador.
+ */
+export enum SanctionStatus {
+  ACTIVE = 'ACTIVE',
+  PENDING = 'PENDING',
+  SERVED = 'SERVED',
+  ANNULLED = 'ANNULLED',
+}
+
+/** Entradas del historial disciplinario (solo se agregan, nunca se borran). */
+export enum DisciplineAction {
+  RULES_UPDATED = 'RULES_UPDATED',
+  SANCTION_CREATED = 'SANCTION_CREATED',
+  SANCTION_UPDATED = 'SANCTION_UPDATED',
+  SANCTION_ANNULLED = 'SANCTION_ANNULLED',
+  SANCTION_RESTORED = 'SANCTION_RESTORED',
+  PLAYED_WHILE_SUSPENDED = 'PLAYED_WHILE_SUSPENDED',
+}
+
+/** Rol de un árbitro en un partido (Módulo 2B). Un rol activo por partido. */
+export enum RefereeRole {
+  CENTRAL = 'CENTRAL',
+  ASSISTANT_1 = 'ASSISTANT_1',
+  ASSISTANT_2 = 'ASSISTANT_2',
+  FOURTH = 'FOURTH',
+  SCOREKEEPER = 'SCOREKEEPER',
+}
+
+/** ABSENT = no se presentó: la asignación se conserva y el sustituto se agrega aparte. */
+export enum RefereeAssignmentStatus {
+  ASSIGNED = 'ASSIGNED',
+  ABSENT = 'ABSENT',
+}
+
+/** Historial de partidos (Módulo 2C). Solo se agregan entradas. */
+export enum MatchLogAction {
+  CREATED = 'CREATED',
+  RESCHEDULED = 'RESCHEDULED',
+  STATUS_CHANGED = 'STATUS_CHANGED',
+  FIELD_CHANGED = 'FIELD_CHANGED',
+  TEAMS_CHANGED = 'TEAMS_CHANGED',
+  UPDATED = 'UPDATED',
+  RESULT_CAPTURED = 'RESULT_CAPTURED',
+  RESULT_CORRECTED = 'RESULT_CORRECTED',
+  REFEREE_ASSIGNED = 'REFEREE_ASSIGNED',
+  REFEREE_REMOVED = 'REFEREE_REMOVED',
+  REFEREE_ABSENT = 'REFEREE_ABSENT',
+  /** Un partido eliminado (copia y recursos liberados). */
+  DELETED = 'DELETED',
+  /** Calendario reemplazado: una entrada con todos los partidos eliminados. */
+  SCHEDULE_REPLACED = 'SCHEDULE_REPLACED',
+}
+
+/** Quién originó el cambio: el organizador o el sistema (p. ej. el cuadro de eliminatoria). */
+export enum MatchLogSource {
+  USER = 'USER',
+  SYSTEM = 'SYSTEM',
+}
+
+/** Por qué se eliminó un partido. */
+export enum MatchLogCause {
+  MANUAL = 'MANUAL',
+  SCHEDULE_REGENERATED = 'SCHEDULE_REGENERATED',
+  FORMAT_CHANGED = 'FORMAT_CHANGED',
+  TIE_REMOVED = 'TIE_REMOVED',
+  BRACKET_SYNC = 'BRACKET_SYNC',
+}
+
+/** Rol de un colaborador en un torneo (RBAC). El propietario es implícito (Tournament.organizerId). */
+export enum TournamentRole {
+  ADMIN = 'ADMIN',
+  COORDINATOR = 'COORDINATOR',
+  SCORER = 'SCORER',
+}
+
+/** REVOKED = acceso retirado; la fila se conserva como auditoría. */
+export enum TournamentMemberStatus {
+  ACTIVE = 'ACTIVE',
+  REVOKED = 'REVOKED',
+}
+
+/** Invitación a colaborar (RBAC R2): por enlace de un solo uso o a la cuenta de un correo. */
+export enum InvitationKind {
+  LINK = 'LINK',
+  ACCOUNT = 'ACCOUNT',
+}
+
+export enum InvitationStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  REVOKED = 'REVOKED',
 }

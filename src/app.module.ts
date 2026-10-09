@@ -17,6 +17,10 @@ import { RegistrationModule } from './modules/registration/registration.module.j
 import { AuthModule } from './modules/auth/auth.module.js';
 import { MeModule } from './modules/me/me.module.js';
 import { LeaguesModule } from './modules/leagues/leagues.module.js';
+import { MatchLogModule } from './modules/match-log/match-log.module.js';
+import { RefereesModule } from './modules/referees/referees.module.js';
+import { VenuesModule } from './modules/venues/venues.module.js';
+import { DisciplineModule } from './modules/discipline/discipline.module.js';
 import { MediaModule } from './modules/media/media.module.js';
 import { AuthorizationModule } from './common/authorization/authorization.module.js';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
@@ -66,6 +70,10 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
     RoundsModule,
     CompetitionModule,
     StatisticsModule,
+    DisciplineModule,
+    VenuesModule,
+    RefereesModule,
+    MatchLogModule,
   ],
   providers: [
     // Autenticación por defecto en TODAS las rutas; las de lectura pública usan @Public().

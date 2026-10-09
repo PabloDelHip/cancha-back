@@ -29,21 +29,27 @@ export type Serialized<T> = T extends Types.ObjectId
           } & ('_id' extends keyof T ? { id: string } : unknown)
         : T;
 
-export function serialize<T>(value: T): Serialized<T> {
-  return convert(value) as Serialized<T>;
+export function serialize<T>(value: T, options: { includePrivateTournamentContact?: boolean } = {}): Serialized<T> {
+  return convert(value, !!options.includePrivateTournamentContact) as Serialized<T>;
 }
 
-function convert(value: unknown): unknown {
+function convert(value: unknown, includePrivateTournamentContact = false): unknown {
   if (value instanceof Types.ObjectId) return value.toHexString();
   if (value instanceof Date || value === null || typeof value !== 'object')
     return value;
-  if (Array.isArray(value)) return value.map(convert);
+  if (Array.isArray(value)) return value.map((v) => convert(v, includePrivateTournamentContact));
 
   const out: Record<string, unknown> = {};
   for (const [key, v] of Object.entries(value)) {
     if (INTERNAL_FIELDS.has(key)) continue;
-    if (key === '_id') out.id = convert(v);
-    else out[key] = convert(v);
+    if (key === '_id') out.id = convert(v, includePrivateTournamentContact);
+    else if (key === 'information' && v && typeof v === 'object' && !includePrivateTournamentContact) {
+      const info = v as Record<string, unknown>;
+      const contact = info.contact as Record<string, unknown> | undefined;
+      const fields = Array.isArray(contact?.publicFields) ? contact.publicFields : [];
+      const allowed = ['name', 'phone', 'email', 'facebook', 'instagram', 'notes'];
+      out[key] = convert({ ...info, contact: Object.fromEntries([...allowed.filter((field) => fields.includes(field)).map((field) => [field, contact?.[field] ?? null]), ['publicFields', fields.filter((field) => allowed.includes(String(field))) ]]) }, false);
+    } else out[key] = convert(v, includePrivateTournamentContact);
   }
   return out;
 }

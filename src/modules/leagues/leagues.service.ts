@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { League } from './schemas/league.schema.js';
-import { Tournament, coverageOf } from '../tournaments/schemas/tournament.schema.js';
+import { Tournament } from '../tournaments/schemas/tournament.schema.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
 import { Match } from '../matches/schemas/match.schema.js';
 import { PlayerMatchStats } from '../matches/schemas/player-match-stats.schema.js';
@@ -10,7 +10,7 @@ import { Player } from '../players/schemas/player.schema.js';
 import { Team } from '../teams/schemas/team.schema.js';
 import { CompetitionService } from '../competition/competition.service.js';
 import { buildStructure } from '../competition/structure.js';
-import { DataCoverage, MatchStatus, PhaseType, PlayerPosition, TournamentStatus } from '../../common/enums/index.js';
+import { MatchStatus, PhaseType, PlayerPosition, TournamentStatus } from '../../common/enums/index.js';
 import { OrganizerAccessService } from '../../common/authorization/organizer-access.service.js';
 import { LeagueAccessService } from '../../common/authorization/league-access.service.js';
 import { publicPlayer, teamRef, tournamentRef, type TeamRef } from '../../common/utils/public.js';
@@ -94,16 +94,13 @@ export class LeaguesService {
 
   /**
    * GET /leagues/:id/history — histórico de la liga con partidos oficiales FINALIZADOS de todos sus
-   * torneos. Campeones, tabla histórica y récords solo con torneos de cobertura completa (en
-   * seguimiento parcial no se conoce la competición entera); las cifras de jugadores, con todo lo
-   * registrado (como los perfiles).
+   * torneos. Incluye campeones, tabla histórica, récords y estadísticas de jugadores.
    */
   async history(id: string) {
     const league = await this.leagues.findById(id).lean();
     if (!league) throw new NotFoundException('Liga no encontrada');
     const tournaments = await this.tournaments.find({ leagueId: league._id }).select(TOURNAMENT_FIELDS).sort({ startDate: 1 }).lean();
     const ids = tournaments.map((t) => t._id);
-    const full = new Set(tournaments.filter((t) => coverageOf(t) === DataCoverage.FULL).map((t) => t._id.toHexString()));
 
     const [matches, enrolled] = await Promise.all([
       this.matches.find({ tournamentId: { $in: ids }, status: MatchStatus.FINISHED, homeScore: { $ne: null }, awayScore: { $ne: null } })
@@ -138,7 +135,7 @@ export class LeaguesService {
     }[] = [];
     for (const t of tournaments) {
       const tid = t._id.toHexString();
-      if (t.status !== TournamentStatus.FINISHED || !full.has(tid)) continue;
+      if (t.status !== TournamentStatus.FINISHED) continue;
       const { input } = await this.competition.context(tid);
       const view = buildStructure(input);
       const ko = view.phases.find((p) => p.type === PhaseType.KNOCKOUT);
@@ -163,11 +160,10 @@ export class LeaguesService {
       table.set(id, r);
       return r;
     };
-    for (const e of enrolled) if (full.has(e.tournamentId.toHexString())) row(e.teamId.toHexString()).tournaments.add(e.tournamentId.toHexString());
+    for (const e of enrolled) row(e.teamId.toHexString()).tournaments.add(e.tournamentId.toHexString());
     let biggest: (typeof matches)[number] | null = null;
     let wildest: (typeof matches)[number] | null = null;
     for (const m of matches) {
-      if (!full.has(m.tournamentId.toHexString())) continue;
       for (const [id, gf, ga] of [[m.homeTeamId.toHexString(), m.homeScore!, m.awayScore!], [m.awayTeamId.toHexString(), m.awayScore!, m.homeScore!]] as const) {
         const r = row(id);
         r.played++;
@@ -264,7 +260,7 @@ export class LeaguesService {
         homeScore: m.homeScore!,
         awayScore: m.awayScore!,
       };
-    const fullMatches = matches.filter((m) => full.has(m.tournamentId.toHexString()));
+    const fullMatches = matches;
     const goals = fullMatches.reduce((n, m) => n + m.homeScore! + m.awayScore!, 0);
     return {
       leagueId: id,

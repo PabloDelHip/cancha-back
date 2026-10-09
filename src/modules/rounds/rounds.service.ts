@@ -8,6 +8,7 @@ import { RoundQueryDto, SaveRoundDto } from './dto/round.dto.js';
 import { paginated, skipFor } from '../../common/dto/pagination.dto.js';
 import { serialize, toObjectId } from '../../common/utils/serialize.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
+import { Permission } from '../../common/authorization/permissions.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
 /**
@@ -43,11 +44,11 @@ export class RoundsService {
   /** Crea la jornada N o actualiza su nombre/fecha (idempotente). */
   async save(tournamentId: string, number: number, dto: SaveRoundDto, user: AuthUser) {
     assertNumber(number);
-    await this.ownership.tournament(tournamentId, user);
+    await this.ownership.tournament(tournamentId, user, Permission.SCHEDULE);
     const set: Record<string, unknown> = {};
     if (dto.name !== undefined) set.name = dto.name?.trim() || null;
     if (dto.date !== undefined) set.date = dto.date || null;
-    return this.ownership.inTournament(tournamentId, async (session) => {
+    return this.ownership.inTournament(tournamentId, { user, permission: Permission.SCHEDULE }, async (session) => {
       const saved = await this.rounds
         .findOneAndUpdate(
           { tournamentId: toObjectId(tournamentId), number },
@@ -65,10 +66,10 @@ export class RoundsService {
    */
   async remove(tournamentId: string, number: number, user: AuthUser) {
     assertNumber(number);
-    await this.ownership.tournament(tournamentId, user);
+    await this.ownership.tournament(tournamentId, user, Permission.SCHEDULE);
     const filter = { tournamentId: toObjectId(tournamentId), number };
     // Con el cerrojo: no se borra la jornada mientras se le programa un partido.
-    await this.ownership.inTournament(tournamentId, async (session) => {
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.SCHEDULE }, async (session) => {
       if (!(await this.rounds.exists(filter).session(session)))
         throw new NotFoundException(`La jornada ${number} no existe`);
       const used = await this.matches

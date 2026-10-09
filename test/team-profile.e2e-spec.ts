@@ -109,9 +109,9 @@ beforeAll(async () => {
   await result(B, x.live, 5, 0, [goal(x.luis, x.dm, 5)], 'LIVE');
   x.sched = await match(B, x.liga, 5, x.r3, x.dm, '2027-02-13');
   x.post = await match(B, x.liga, 6, x.dm, x.empty, '2027-02-20');
-  await as(B).patch(`/api/matches/${x.post}`).send({ status: 'POSTPONED' }).expect(200);
+  await as(B).patch(`/api/matches/${x.post}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(200);
   x.canc = await match(B, x.liga, 7, x.empty, x.dm, '2027-02-27');
-  await as(B).patch(`/api/matches/${x.canc}`).send({ status: 'CANCELLED' }).expect(200);
+  await as(B).patch(`/api/matches/${x.canc}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(200);
   // Pedro se da de baja: su participación queda en la historia (active=false).
   await as(B).delete(`/api/tournaments/${x.liga}/players/${x.pedro}`).expect(204);
 

@@ -16,6 +16,7 @@ import { paginated, skipFor } from '../../common/dto/pagination.dto.js';
 import { serialize, toObjectId } from '../../common/utils/serialize.js';
 import { escapeRegex } from '../../common/utils/regex.js';
 import { TeamAccessService } from '../../common/authorization/team-access.service.js';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import { TeamAdmin } from './schemas/team-admin.schema.js';
 import { TeamRoster } from './schemas/team-roster.schema.js';
 import { TeamAdminStatus, TeamRosterStatus } from '../../common/enums/index.js';
@@ -43,6 +44,7 @@ export class TeamsService {
     @InjectModel(TeamRoster.name) private readonly rosters: Model<TeamRoster>,
     private readonly membershipsService: MembershipsService,
     private readonly access: TeamAccessService,
+    private readonly tournamentAccess: TournamentAccessService,
     private readonly images: ImagesService,
     private readonly cloudinary: CloudinaryService,
   ) {}
@@ -61,7 +63,8 @@ export class TeamsService {
   async findMine(user: AuthUser, query: TeamQueryDto) {
     const me = toObjectId(user.id);
     const [myTournaments, administered] = await Promise.all([
-      this.tournaments.distinct('_id', { organizerId: me }) as Promise<Types.ObjectId[]>,
+      // Torneos propios y aquellos donde colabora (RBAC).
+      this.tournamentAccess.accessible(user.id).then((roles) => [...roles.keys()].map(toObjectId)),
       this.admins.distinct('teamId', { userId: me, status: TeamAdminStatus.ACTIVE }) as Promise<Types.ObjectId[]>,
     ]);
     const enrolled = await this.enrollments.distinct('teamId', { tournamentId: { $in: myTournaments } });

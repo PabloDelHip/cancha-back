@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { SendOff } from '../../../common/enums/index.js';
 
 /**
  * Participación de un jugador en UN partido. Es la fuente de verdad de todas las
@@ -34,6 +35,13 @@ export class PlayerMatchStats {
 
   @Prop({ required: true, default: 0, min: 0, max: 1 })
   redCards: number;
+
+  /**
+   * Tipo de expulsión: null = no fue expulsado. Ausente en capturas anteriores al módulo
+   * disciplinario (o de clientes que no lo envían): esas no se interpretan automáticamente.
+   */
+  @Prop({ type: String, enum: [...Object.values(SendOff), null], default: undefined })
+  sendOff?: SendOff | null;
 
   createdAt: Date;
   updatedAt: Date;

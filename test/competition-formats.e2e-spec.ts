@@ -326,11 +326,11 @@ describe('Configuración y reglas de escritura', () => {
     const [a, b, c, d] = await teams(t, 4);
     const m = ((await schedule(t).expect(201)).body.matches as { id: string }[])[0].id;
     await as().post('/api/matches').send({ tournamentId: t, round: 9, homeTeamId: a, awayTeamId: b, date: '2027-03-01', time: '18:00' }).expect(409);
-    await as().patch(`/api/matches/${m}`).send({ homeTeamId: c }).expect(409);
+    await as().patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', homeTeamId: c }).expect(409);
     await as().delete(`/api/matches/${m}`).expect(409);
-    await as().patch(`/api/matches/${m}`).send({ status: 'CANCELLED' }).expect(409);
-    await as().patch(`/api/matches/${m}`).send({ status: 'POSTPONED' }).expect(200); // reprogramar sí
-    await as().patch(`/api/matches/${m}`).send({ status: 'SCHEDULED', date: '2027-03-08' }).expect(200);
+    await as().patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(409);
+    await as().patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(200); // reprogramar sí
+    await as().patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', status: 'SCHEDULED', date: '2027-03-08' }).expect(200);
     expect(d).toBeDefined();
   });
 

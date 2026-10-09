@@ -29,6 +29,13 @@ import { TeamRoster, TeamRosterSchema } from '../modules/teams/schemas/team-rost
 import { RegistrationLink, RegistrationLinkSchema } from '../modules/registration/schemas/registration-link.schema.js';
 import { RegistrationRequest, RegistrationRequestSchema } from '../modules/registration/schemas/registration-request.schema.js';
 import { RegistrationDraft, RegistrationDraftSchema } from '../modules/registration/schemas/registration-draft.schema.js';
+import { TournamentInvitation, TournamentInvitationSchema } from '../modules/tournaments/schemas/tournament-invitation.schema.js';
+import { TournamentMember, TournamentMemberSchema } from '../modules/tournaments/schemas/tournament-member.schema.js';
+import { MatchLog, MatchLogSchema } from '../modules/match-log/schemas/match-log.schema.js';
+import { Referee, RefereeSchema } from '../modules/referees/schemas/referee.schema.js';
+import { Venue, VenueSchema } from '../modules/venues/schemas/venue.schema.js';
+import { Sanction, SanctionSchema } from '../modules/discipline/schemas/sanction.schema.js';
+import { DisciplineLog, DisciplineLogSchema } from '../modules/discipline/schemas/discipline-log.schema.js';
 import {
   AuthSession,
   AuthSessionSchema,
@@ -59,4 +66,11 @@ export const Models = {
   registrationRequest: { name: RegistrationRequest.name, schema: RegistrationRequestSchema },
   registrationDraft: { name: RegistrationDraft.name, schema: RegistrationDraftSchema },
   authSession: { name: AuthSession.name, schema: AuthSessionSchema },
+  sanction: { name: Sanction.name, schema: SanctionSchema },
+  disciplineLog: { name: DisciplineLog.name, schema: DisciplineLogSchema },
+  venue: { name: Venue.name, schema: VenueSchema },
+  referee: { name: Referee.name, schema: RefereeSchema },
+  matchLog: { name: MatchLog.name, schema: MatchLogSchema },
+  tournamentMember: { name: TournamentMember.name, schema: TournamentMemberSchema },
+  tournamentInvitation: { name: TournamentInvitation.name, schema: TournamentInvitationSchema },
 } satisfies Record<string, ModelDefinition>;

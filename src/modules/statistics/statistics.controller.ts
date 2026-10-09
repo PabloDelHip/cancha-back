@@ -47,17 +47,6 @@ export class StatisticsController {
     return this.profiles.profile(id);
   }
 
-  @Get('tournaments/:id/tracked-summary')
-  @ApiOperation({
-    summary: 'Equipos en seguimiento de un torneo PARTIAL (6G)',
-    description:
-      'Una tarjeta por equipo seguido con SUS partidos registrados en este torneo: balance, forma, último y próximo partido, máximo goleador y asistidor, tamaño de plantilla. No es una clasificación. FULL o sin equipos seguidos: trackedTeams = []. Consultas fijas.',
-  })
-  @ApiNotFoundResponse({ description: 'Torneo no encontrado' })
-  trackedSummary(@Param('id', IsObjectIdPipe) id: string) {
-    return this.teamProfiles.trackedSummary(id);
-  }
-
   @Get('tournaments/:id/standings')
   @ApiOperation({
     summary: 'Tabla de posiciones',

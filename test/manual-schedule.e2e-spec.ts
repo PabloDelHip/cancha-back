@@ -72,7 +72,7 @@ describe('Jornadas a mano que cuentan en la tabla', () => {
     let table = (await structure(t)).phases[0].table as { teamId: string; points: number; played: number }[];
     expect(table.find((r) => r.teamId === a)).toMatchObject({ points: 3, played: 1 });
     // Cambiar equipos de un partido sin resultado y borrar uno: es su calendario.
-    await as().patch(`/api/matches/${m2.id}`).send({ homeTeamId: b, awayTeamId: c }).expect(200);
+    await as().patch(`/api/matches/${m2.id}`).send({ reason: 'Motivo de prueba', homeTeamId: b, awayTeamId: c }).expect(200);
     const m3 = (await match(t, 4, a, c).expect(201)).body;
     await as().delete(`/api/matches/${m3.id}`).expect(204);
     await result(m2.id, 1, 1).expect(200);
@@ -92,7 +92,7 @@ describe('Jornadas a mano que cuentan en la tabla', () => {
     expect(ac.stage).toEqual({ phase: 0, group: 'A', tie: null });
     const cross = await match(t, 2, a, b).expect(409);
     expect(cross.body.message).toMatch(/grupos distintos/);
-    await as().patch(`/api/matches/${ac.id}`).send({ awayTeamId: b }).expect(409); // pasaría a ser entre grupos
+    await as().patch(`/api/matches/${ac.id}`).send({ reason: 'Motivo de prueba', awayTeamId: b }).expect(409); // pasaría a ser entre grupos
     await result(ac.id, 0, 3).expect(200);
     const groupA = (await structure(t)).phases[0].groups[0];
     expect(groupA.table[0]).toMatchObject({ teamId: c, points: 3 });

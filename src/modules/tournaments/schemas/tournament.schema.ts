@@ -7,6 +7,8 @@ import {
   TournamentFormat,
   TournamentStatus,
 } from '../../../common/enums/index.js';
+import { DisciplineRules, DisciplineRulesSchema } from '../../discipline/schemas/discipline-rules.schema.js';
+import { TournamentInformation, TournamentInformationSchema } from './tournament-information.schema.js';
 import type { TournamentPhase } from '../../competition/types.js';
 
 /** Configuración deportiva. Desempate V1 fijo: puntos → diferencia de goles → goles a favor. */
@@ -151,19 +153,20 @@ export class Tournament {
   @Prop({ type: TournamentSettingsSchema, default: () => ({ ...DEFAULT_SETTINGS }) })
   settings: TournamentSettings;
 
-  /**
-   * FULL (defecto) o PARTIAL: si Cancha puede presentar las vistas GLOBALES (tabla, goleadores,
-   * estructura). No toca partidos ni estadísticas. Leer siempre con `coverageOf` (los documentos
-   * anteriores a 6F no tienen el campo y `lean()` no aplica defaults).
-   */
+  @Prop({ type: TournamentInformationSchema, default: () => ({}) })
+  information: TournamentInformation;
+
+  @Prop({ type: String, default: null })
+  logoUrl: string | null;
+
+  @Prop({ type: String, default: null, select: false })
+  logoPublicId: string | null;
+
+  /** Campo de compatibilidad. Los torneos antiguos se leen siempre como FULL. */
   @Prop({ type: String, enum: DataCoverage, default: DataCoverage.FULL })
   dataCoverage: DataCoverage;
 
-  /**
-   * Equipos EN SEGUIMIENTO (6G), solo con cobertura PARTIAL: subconjunto de los inscritos
-   * (TournamentTeam) cuyos partidos presenta Cancha públicamente. Participar ≠ estar seguido.
-   * En FULL siempre vacío. No altera la validez de partidos ni estadísticas.
-   */
+  /** Campo obsoleto. Se expone siempre vacío para clientes anteriores. */
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Team' }], default: [] })
   trackedTeamIds: Types.ObjectId[];
 
@@ -177,6 +180,13 @@ export class Tournament {
 
   @Prop({ type: TournamentRegistrationSettingsSchema, default: () => ({ ...DEFAULT_REGISTRATION }) })
   registration: TournamentRegistrationSettings;
+
+  /**
+   * Reglamento disciplinario (solo administrativo: no se expone en las respuestas públicas).
+   * Ausente en torneos anteriores: se lee con `disciplineOf()` (sin sanciones automáticas).
+   */
+  @Prop({ type: DisciplineRulesSchema, default: undefined, select: false })
+  discipline?: DisciplineRules;
 
   /** Liga a la que pertenece (todo torneo vive en una; null solo en documentos previos a las ligas). */
   @Prop({ type: Types.ObjectId, ref: 'League', default: null, index: true })
@@ -203,13 +213,13 @@ TournamentSchema.index({ status: 1, startDate: -1 });
 TournamentSchema.index({ organizerId: 1, startDate: -1 });
 
 /** Cobertura efectiva: sin campo (torneos anteriores a 6F) = FULL. */
-export function coverageOf(t: { dataCoverage?: DataCoverage | string | null }): DataCoverage {
-  return t.dataCoverage === DataCoverage.PARTIAL ? DataCoverage.PARTIAL : DataCoverage.FULL;
+export function coverageOf(_t: { dataCoverage?: DataCoverage | string | null }): DataCoverage {
+  return DataCoverage.FULL;
 }
 
 /** Equipos seguidos efectivos: [] en FULL y en documentos anteriores a 6G. */
-export function trackedOf(t: { dataCoverage?: DataCoverage | string | null; trackedTeamIds?: Types.ObjectId[] | null }): Types.ObjectId[] {
-  return coverageOf(t) === DataCoverage.PARTIAL ? (t.trackedTeamIds ?? []) : [];
+export function trackedOf(_t: { dataCoverage?: DataCoverage | string | null; trackedTeamIds?: Types.ObjectId[] | null }): Types.ObjectId[] {
+  return [];
 }
 
 /**

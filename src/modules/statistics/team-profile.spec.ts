@@ -211,7 +211,7 @@ describe('buildTeamProfile', () => {
     expect(build({ tournaments: [], matches: [] }).currentRoster).toEqual([]);
   });
 
-  it('cobertura PARTIAL (6F): balance, partidos, goleadores y asistidores intactos; sin posición, posición final ni título', () => {
+  it('la cobertura antigua no oculta posiciones ni títulos', () => {
     const matches = [M('liga', 'a', 'b', 2, 0, '2026-11-07'), M('liga', 'c', 'd', 1, 1, '2026-11-07')];
     const stats = [stat('p1', 'liga', 2), stat('p2', 'liga', 0, 2)];
     const players = [P('p1', 'Pérez'), P('p2', 'López')];
@@ -219,13 +219,13 @@ describe('buildTeamProfile', () => {
     const partial = build({ tournaments: [{ ...T('liga', 'FINISHED', '2026-11-01'), dataCoverage: 'PARTIAL' }], matches, stats, players });
     expect(full.honors).toHaveLength(1);
     expect(full.competitions[0].finalStanding).not.toBeNull();
-    expect(partial.honors).toEqual([]);
-    expect(partial.competitions[0]).toMatchObject({ standing: null, finalStanding: null });
+    expect(partial.honors).toEqual(full.honors);
+    expect(partial.competitions).toEqual(full.competitions);
     for (const k of ['career', 'form', 'recentMatches', 'topScorers', 'topAssists'] as const) expect(partial[k]).toEqual(full[k]);
     expect(partial.career).toMatchObject({ matchesPlayed: 1, wins: 1, goalsFor: 2 });
     // En curso: tampoco hay posición en la tabla.
     const live = build({ tournaments: [{ ...T('liga', 'ACTIVE', '2026-11-01'), dataCoverage: 'PARTIAL' }], matches });
-    expect(live.currentParticipations).toEqual([expect.objectContaining({ standing: null })]);
+    expect(live.currentParticipations[0].standing).not.toBeNull();
     expect(build({ tournaments: [T('liga', 'ACTIVE', '2026-11-01')], matches }).currentParticipations[0].standing).not.toBeNull();
   });
 

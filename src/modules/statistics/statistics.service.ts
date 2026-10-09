@@ -4,7 +4,6 @@ import { Model, Types } from 'mongoose';
 import { Match } from '../matches/schemas/match.schema.js';
 import { PlayerMatchStats } from '../matches/schemas/player-match-stats.schema.js';
 import { DEFAULT_SETTINGS, Tournament, withCoverage } from '../tournaments/schemas/tournament.schema.js';
-import { assertFullCoverage } from '../tournaments/coverage.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
 import { Team } from '../teams/schemas/team.schema.js';
 import { Player } from '../players/schemas/player.schema.js';
@@ -57,7 +56,7 @@ export class StatisticsService {
   async standings(tournamentId: string) {
     const tournament = await this.tournaments.findById(tournamentId).select('settings dataCoverage').lean();
     if (!tournament) throw new NotFoundException(`Torneo ${tournamentId} no encontrado`);
-    assertFullCoverage(tournament);
+
     const s = { ...DEFAULT_SETTINGS, ...tournament.settings };
     if (phasesOf(s.system)[0] !== PhaseType.LEAGUE) return [];
     const points = pointsRuleOf(s);
@@ -86,7 +85,7 @@ export class StatisticsService {
   async topScorers(tournamentId: string, limit: number) {
     const tournament = await this.tournaments.findById(tournamentId).select('dataCoverage').lean();
     if (!tournament) throw new NotFoundException(`Torneo ${tournamentId} no encontrado`);
-    assertFullCoverage(tournament);
+
     const matches = await this.finishedMatches({
       tournamentId: toObjectId(tournamentId),
     });

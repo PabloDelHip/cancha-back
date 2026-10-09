@@ -26,6 +26,7 @@ import { publicPlayer } from '../../common/utils/public.js';
 import { TeamRosterStatus, TournamentStatus } from '../../common/enums/index.js';
 import { TeamRoster } from '../teams/schemas/team-roster.schema.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { ImagesService } from '../media/images.service.js';
 import { CloudinaryService, IMAGE_PRESETS } from '../media/cloudinary.service.js';
@@ -46,6 +47,7 @@ export class PlayersService {
     private readonly tournaments: Model<Tournament>,
     private readonly membershipsService: MembershipsService,
     private readonly ownership: OwnershipService,
+    private readonly tournamentAccess: TournamentAccessService,
     private readonly images: ImagesService,
     private readonly cloudinary: CloudinaryService,
     private readonly duplicates: PlayerDuplicatesService,
@@ -66,7 +68,8 @@ export class PlayersService {
    * quien sea) y las fichas que registré yo. `canEdit` indica si puedo editar la ficha maestra.
    */
   async findMine(user: AuthUser, query: PlayerQueryDto) {
-    const myTournaments = (await this.tournaments.distinct('_id', { organizerId: toObjectId(user.id) })) as Types.ObjectId[];
+    // Torneos propios y aquellos donde colabora (RBAC).
+    const myTournaments = [...(await this.tournamentAccess.accessible(user.id)).keys()].map(toObjectId);
     const participants = await this.memberships.distinct('playerId', {
       tournamentId: { $in: myTournaments },
       active: true,

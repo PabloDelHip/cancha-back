@@ -113,7 +113,7 @@ describe('Player global', () => {
         playerStats: [{ playerId: ids.juan, teamId: ids.tigres, goals: 5, assists: 0, yellowCards: 0, redCards: 0 }],
       })
       .expect(403);
-    await as(B).patch(`/api/matches/${ids.matchA}`).send({ status: 'CANCELLED' }).expect(403);
+    await as(B).patch(`/api/matches/${ids.matchA}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(403);
     const stats = await api().get(`/api/matches/${ids.matchA}/stats`).expect(200);
     expect(stats.body).toEqual([expect.objectContaining({ playerId: ids.juan, goals: 2 })]);
   });

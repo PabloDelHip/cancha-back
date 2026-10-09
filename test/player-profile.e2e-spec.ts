@@ -111,9 +111,9 @@ beforeAll(async () => {
   await result(A, x.mLive, 0, 3, [line(x.pablo, x.halcones, { goals: 3, redCards: 1 })], 'LIVE');
   x.mScheduled = await match(A, x.apertura, 3, x.halcones, x.rivalAp, '2027-01-30');
   x.mPostponed = await match(A, x.apertura, 4, x.rivalAp, x.halcones, '2027-02-13');
-  await as(A).patch(`/api/matches/${x.mPostponed}`).send({ status: 'POSTPONED' }).expect(200);
+  await as(A).patch(`/api/matches/${x.mPostponed}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(200);
   x.mCancelled = await match(A, x.apertura, 5, x.halcones, x.rivalAp, '2027-02-20');
-  await as(A).patch(`/api/matches/${x.mCancelled}`).send({ status: 'CANCELLED' }).expect(200);
+  await as(A).patch(`/api/matches/${x.mCancelled}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(200);
   x.mBench = await match(A, x.apertura, 6, x.rivalAp, x.halcones, '2027-02-27');
   await result(A, x.mBench, 1, 1, [line(x.pablo, x.halcones, {}, false)]);
 

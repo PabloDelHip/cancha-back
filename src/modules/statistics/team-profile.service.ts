@@ -7,7 +7,7 @@ import { Player } from '../players/schemas/player.schema.js';
 import { TeamMembership } from '../players/schemas/team-membership.schema.js';
 import { Match } from '../matches/schemas/match.schema.js';
 import { PlayerMatchStats } from '../matches/schemas/player-match-stats.schema.js';
-import { Tournament, trackedOf } from '../tournaments/schemas/tournament.schema.js';
+import { Tournament } from '../tournaments/schemas/tournament.schema.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
 import { TeamRoster } from '../teams/schemas/team-roster.schema.js';
 import { CompetitionSystem, MatchStatus, TeamRosterStatus } from '../../common/enums/index.js';
@@ -15,7 +15,6 @@ import { toObjectId } from '../../common/utils/serialize.js';
 import { publicPlayer, teamRef, tournamentRef } from '../../common/utils/public.js';
 import { paginated, PaginationQueryDto, skipFor } from '../../common/dto/pagination.dto.js';
 import { buildTeamProfile, teamMatch, type TPMatch, type TPTournament } from './team-profile.js';
-import { buildTrackedSummary } from './tracked-summary.js';
 
 const MATCH_FIELDS = 'tournamentId round date time status homeTeamId awayTeamId homeScore awayScore stage penalties';
 
@@ -173,53 +172,4 @@ export class TeamProfileService {
     return paginated(matches.map((m) => teamMatch(m, id, tournamentsById, teamsById)), total, query);
   }
 
-  /**
-   * GET /tournaments/:id/tracked-summary (6G). Tarjetas de TODOS los equipos seguidos en consultas
-   * fijas (≤ 6, con 2 o con 20 equipos): torneo · partidos de los seguidos · sus estadísticas
-   * oficiales · plantillas del torneo ($group) · equipos · jugadores. FULL o sin equipos seguidos →
-   * `trackedTeams: []` con 1 consulta.
-   */
-  async trackedSummary(tournamentId: string) {
-    const t = await this.tournaments
-      .findById(tournamentId)
-      .select('name status category format startDate endDate dataCoverage trackedTeamIds')
-      .lean();
-    if (!t) throw new NotFoundException(`Torneo ${tournamentId} no encontrado`);
-    const tracked = trackedOf(t);
-    const tournament = tournamentRef(t);
-    if (!tracked.length) return { tournamentId, dataCoverage: tournament.dataCoverage, trackedTeams: [] };
-    const tid = t._id;
-    const rows = await this.matches
-      .find({ tournamentId: tid, $or: [{ homeTeamId: { $in: tracked } }, { awayTeamId: { $in: tracked } }] })
-      .select(MATCH_FIELDS)
-      .lean<LeanMatch[]>();
-    const matches = rows.map(toTPMatch);
-    const finishedIds = rows.filter((m) => m.status === MatchStatus.FINISHED).map((m) => m._id);
-    const [stats, squads, teamDocs] = await Promise.all([
-      finishedIds.length
-        ? this.stats.find({ matchId: { $in: finishedIds }, teamId: { $in: tracked }, played: true }).select('playerId teamId goals assists').lean()
-        : Promise.resolve([]),
-      this.memberships.aggregate<{ _id: Types.ObjectId; n: number }>([
-        { $match: { tournamentId: tid, teamId: { $in: tracked }, active: true } },
-        { $group: { _id: '$teamId', players: { $addToSet: '$playerId' } } },
-        { $project: { n: { $size: '$players' } } },
-      ]),
-      this.teams
-        .find({ _id: { $in: [...new Set([...tracked.map(String), ...matches.flatMap((m) => [m.homeTeamId, m.awayTeamId])])].map(toObjectId) } })
-        .select('name shortName logoUrl colors')
-        .lean(),
-    ]);
-    const playerDocs = stats.length
-      ? await this.players.find({ _id: { $in: [...new Set(stats.map((s) => s.playerId.toHexString()))].map(toObjectId) } }).lean()
-      : [];
-    return buildTrackedSummary({
-      tournament,
-      trackedTeamIds: tracked.map(String),
-      matches,
-      stats: stats.map((s) => ({ playerId: s.playerId.toHexString(), teamId: s.teamId.toHexString(), goals: s.goals, assists: s.assists })),
-      teams: new Map(teamDocs.map((d) => [d._id.toHexString(), teamRef(d)])),
-      players: new Map(playerDocs.map((p) => [p._id.toHexString(), publicPlayer(p)])),
-      squadSizes: new Map(squads.map((r) => [r._id.toHexString(), r.n])),
-    });
-  }
 }

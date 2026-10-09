@@ -6,13 +6,16 @@ import { Match } from '../matches/schemas/match.schema.js';
 import { PlayerMatchStats } from '../matches/schemas/player-match-stats.schema.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
 import { Team } from '../teams/schemas/team.schema.js';
-import { CompetitionSystem, MatchStatus } from '../../common/enums/index.js';
+import { CompetitionSystem, MatchLogCause, MatchStatus } from '../../common/enums/index.js';
 import { GenerateScheduleDto } from './dto/round.dto.js';
 import { manualBracketSizes, matchDoc, planInitialPhase, planManualStart } from '../competition/planner.js';
 import { validateFormatForTeams } from '../competition/formats.js';
 import { DEFAULT_SETTINGS, Tournament } from '../tournaments/schemas/tournament.schema.js';
 import { serialize, toObjectId } from '../../common/utils/serialize.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
+import { Permission } from '../../common/authorization/permissions.js';
+import { assertAssignmentsReleased } from '../venues/venues.service.js';
+import { MatchLogService } from '../match-log/match-log.service.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
 /**
@@ -40,12 +43,13 @@ export class ScheduleService {
     @InjectModel(Team.name) private readonly teams: Model<Team>,
     @InjectModel(Tournament.name) private readonly tournaments: Model<Tournament>,
     private readonly ownership: OwnershipService,
+    private readonly log: MatchLogService,
   ) {}
 
   async generate(tournamentId: string, dto: GenerateScheduleDto, user: AuthUser) {
-    await this.ownership.tournament(tournamentId, user);
+    await this.ownership.tournament(tournamentId, user, Permission.SCHEDULE);
     const tid = toObjectId(tournamentId);
-    return this.ownership.inTournament(tid, async (session) => {
+    return this.ownership.inTournament(tid, { user, permission: Permission.SCHEDULE }, async (session) => {
       const tournament = (await this.tournaments.findById(tid).session(session).lean())!;
       const settings = { ...DEFAULT_SETTINGS, ...tournament.settings };
       const enrolled = (await this.enrollments.distinct('teamId', { tournamentId: tid }).session(session)).map(String);
@@ -82,6 +86,7 @@ export class ScheduleService {
           'El torneo ya tiene partidos jugados o en juego: su calendario no se puede regenerar. Agrega jornadas y partidos manualmente.',
         );
       }
+      await assertAssignmentsReleased(this.matches, tid, dto.releaseAssignments, session);
       if (existing.length && !dto.replaceExisting) {
         throw new ConflictException(
           `El torneo ya tiene ${existing.length} partidos programados. Para reemplazarlos envía replaceExisting: true`,
@@ -114,6 +119,8 @@ export class ScheduleService {
       });
       if (plan.rounds.length > 99) throw new BadRequestException('El calendario superaría las 99 jornadas');
 
+      // Los partidos reemplazados quedan en el historial del torneo (una sola entrada, con lo liberado).
+      await this.log.deleting(session, { userId: user.id }, { tournamentId: tid }, MatchLogCause.SCHEDULE_REGENERATED, { bulk: true });
       await this.matches.deleteMany({ tournamentId: tid }, { session });
       await this.rounds.deleteMany({ tournamentId: tid }, { session });
       await this.rounds.insertMany(plan.rounds.map((r) => ({ tournamentId: tid, ...r })), { session });
@@ -144,3 +151,4 @@ export class ScheduleService {
 }
 
 const samePermutation = (a: string[], b: string[]) => a.length === b.length && new Set(a).size === a.length && [...a].sort().join() === [...b].sort().join();
+

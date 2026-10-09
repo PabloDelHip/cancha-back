@@ -138,12 +138,10 @@ export function buildPlayerProfile(input: ProfileInput) {
   const competitions = [...groups.entries()]
     .filter(([tournamentId]) => tournaments.has(tournamentId))
     .map(([tournamentId, byTeam]) => {
-      const tournament = tournaments.get(tournamentId)!;
+      const tournament = { ...tournaments.get(tournamentId)!, dataCoverage: 'FULL' as const };
       const finished = tournament.status === FINISHED;
-      // PARTIAL (6F): sin campeón, finalista, fase ni goleador del torneo (dependen de todos sus
-      // partidos). Sus estadísticas y partidos sí cuentan.
-      const global = tournament.dataCoverage !== 'PARTIAL';
-      const ctx = global ? input.competitionContexts?.get(tournamentId) : undefined;
+
+      const ctx = input.competitionContexts?.get(tournamentId);
       const structure = ctx && finished ? structureOf(ctx, nameOf) : null;
       const teamParticipations = [...byTeam.entries()].map(([teamId, g]) => {
         const latest = [...g.memberships].sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
@@ -170,7 +168,7 @@ export function buildPlayerProfile(input: ProfileInput) {
         system: (ctx?.tournament.system ?? null) as CompetitionSystem | null,
         stats,
         teams: teamParticipations,
-        topScorer: global && finished && stats.appearances ? topScorerOf(input.player.id, input.tournamentGoals?.get(tournamentId)) : null,
+        topScorer: finished && stats.appearances ? topScorerOf(input.player.id, input.tournamentGoals?.get(tournamentId)) : null,
       };
     })
     .sort(

@@ -513,3 +513,11 @@ curl -b jar -c jar -X POST $A/auth/logout                            # 204; el r
 - Formatos: sin mejores terceros, sin gol de visitante, sin partido por el tercer lugar, sin
   sorteo de grupos en la UI (reparto por orden alfabético o `groups` explícito por API). El modo
   mock del frontend solo simula la liga clásica.
+
+## Cobertura de torneos
+
+Todos los torneos muestran la competición completa: equipos, partidos, tabla, goleadores y estructura. El modo de seguimiento parcial fue retirado. Los campos antiguos se normalizan a cobertura completa y equipos seguidos vacíos al leerlos; no se borran partidos, resultados ni estadísticas. La API rechaza `PARTIAL` y listas de equipos seguidos no vacías.
+
+## Información y condiciones del torneo
+
+Los torneos pueden incluir temporada, descripción, horarios, cuotas y costos, reglamento en texto, premios y contacto con privacidad por campo. El formulario conserva las reglas deportivas y reutiliza la fecha límite y el cupo existentes. El logo utiliza la integración actual de Cloudinary; los PDF no están habilitados. Ver [contrato e inventario](../docs/tournament-information.md).

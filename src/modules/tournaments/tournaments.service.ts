@@ -5,14 +5,23 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import type { ClientSession } from 'mongoose';
-import { CompetitionSystem, DataCoverage, KnockoutTiebreak, MatchStatus, TournamentStatus } from '../../common/enums/index.js';
-import { coverageOf, DEFAULT_SETTINGS, Tournament, TournamentSettings, withCoverage } from './schemas/tournament.schema.js';
+import { CompetitionSystem, DataCoverage, KnockoutTiebreak, MatchLogCause, MatchStatus, TournamentStatus } from '../../common/enums/index.js';
+import { DEFAULT_REGISTRATION, DEFAULT_SETTINGS, Tournament, TournamentSettings, withCoverage } from './schemas/tournament.schema.js';
 import { TournamentTeam } from './schemas/tournament-team.schema.js';
 import { Team } from '../teams/schemas/team.schema.js';
 import { Match } from '../matches/schemas/match.schema.js';
 import { TeamMembership } from '../players/schemas/team-membership.schema.js';
+import { Sanction } from '../discipline/schemas/sanction.schema.js';
+import { DisciplineLog } from '../discipline/schemas/discipline-log.schema.js';
+import { RefereesService } from '../referees/referees.service.js';
+import { MatchLogService } from '../match-log/match-log.service.js';
+import { MatchLog } from '../match-log/schemas/match-log.schema.js';
+import { TournamentMember } from './schemas/tournament-member.schema.js';
+import { TournamentInvitation } from './schemas/tournament-invitation.schema.js';
+import { assertAssignmentsReleased, VenuesService } from '../venues/venues.service.js';
+import { DEFAULT_MATCH_MINUTES } from '../venues/occupancy.js';
 import { Round } from '../rounds/schemas/round.schema.js';
 import {
   CreateTournamentDto,
@@ -29,11 +38,17 @@ import {
   type WithId,
 } from '../../common/utils/serialize.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
+import { Permission, permissionsOf } from '../../common/authorization/permissions.js';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import { LeagueAccessService } from '../../common/authorization/league-access.service.js';
 import { OrganizerAccessService } from '../../common/authorization/organizer-access.service.js';
 import { validateFormatSettings } from '../competition/formats.js';
 import { CompetitionService } from '../competition/competition.service.js';
 import type { AuthUser } from '../auth/auth.types.js';
+
+import { definedInformation, mergeInformation, validateInformation } from './tournament-information.js';
+import { assertImage, type UploadedImage } from '../media/image-upload.js';
+import { CloudinaryService, IMAGE_PRESETS } from '../media/cloudinary.service.js';
 
 @Injectable()
 export class TournamentsService {
@@ -47,24 +62,72 @@ export class TournamentsService {
     @InjectModel(TeamMembership.name)
     private readonly memberships: Model<TeamMembership>,
     @InjectModel(Round.name) private readonly rounds: Model<Round>,
+    @InjectModel(Sanction.name) private readonly sanctions: Model<Sanction>,
+    @InjectModel(DisciplineLog.name) private readonly disciplineLog: Model<DisciplineLog>,
+    @InjectModel(MatchLog.name) private readonly matchLogs: Model<MatchLog>,
+    @InjectModel(TournamentMember.name) private readonly members: Model<TournamentMember>,
+    @InjectModel(TournamentInvitation.name) private readonly invitations: Model<TournamentInvitation>,
     private readonly ownership: OwnershipService,
     private readonly competition: CompetitionService,
     private readonly organizers: OrganizerAccessService,
     private readonly leagues: LeagueAccessService,
+    private readonly cloudinary: CloudinaryService,
+    private readonly venues: VenuesService,
+    private readonly referees: RefereesService,
+    private readonly log: MatchLogService,
+    private readonly access: TournamentAccessService,
   ) {}
+
+  async findOwned(id: string, user: AuthUser) {
+    const { tournament, role } = await this.access.require(id, user.id, Permission.VIEW);
+    return { ...serialize(withCoverage(tournament), { includePrivateTournamentContact: true }), myRole: role, permissions: permissionsOf(role) };
+  }
+
+  async setLogo(id: string, file: UploadedImage | undefined, user: AuthUser) {
+    await this.ownership.tournament(id, user, Permission.SETTINGS);
+    assertImage(file);
+    const stored = await this.cloudinary.upload(file, IMAGE_PRESETS.tournamentLogo);
+    let previous: string | null | undefined;
+    try {
+      previous = await this.ownership.inTournament(id, { user, permission: Permission.SETTINGS }, async (session) => {
+        const before = await this.tournaments.findByIdAndUpdate(id, { $set: { logoUrl: stored.url, logoPublicId: stored.publicId } }, { session, returnDocument: 'before' }).select('+logoPublicId').lean();
+        if (!before) throw new NotFoundException('El torneo ya no existe');
+        return before.logoPublicId;
+      });
+    } catch (error) {
+      await this.cloudinary.destroy(stored.publicId);
+      throw error;
+    }
+    await this.cloudinary.destroy(previous);
+    return this.findOwned(id, user);
+  }
+
+  async removeLogo(id: string, user: AuthUser) {
+    await this.ownership.tournament(id, user, Permission.SETTINGS);
+    const previous = await this.ownership.inTournament(id, { user, permission: Permission.SETTINGS }, async (session) => {
+      const before = await this.tournaments.findByIdAndUpdate(id, { $set: { logoUrl: null, logoPublicId: null } }, { session, returnDocument: 'before' }).select('+logoPublicId').lean();
+      return before?.logoPublicId;
+    });
+    await this.cloudinary.destroy(previous);
+    return this.findOwned(id, user);
+  }
 
   /** Listado público. */
   async findAll(query: TournamentQueryDto) {
     return this.list(query.status ? { status: query.status } : {}, query);
   }
 
-  /** Torneos del organizador autenticado (panel /admin). */
+  /**
+   * Torneos que administra el usuario (panel /admin): los propios y aquellos donde colabora,
+   * cada uno con su rol y permisos (`myRole`, `permissions`). El backend vuelve a validar cada
+   * acción: estos campos solo sirven para que la interfaz muestre lo que corresponde.
+   */
   async findMine(user: AuthUser, query: TournamentQueryDto) {
-    const filter: Record<string, unknown> = {
-      organizerId: toObjectId(user.id),
-    };
+    const roles = await this.access.accessible(user.id);
+    const filter: Record<string, unknown> = { _id: { $in: [...roles.keys()].map(toObjectId) } };
     if (query.status) filter.status = query.status;
-    return this.list(filter, query);
+    const page = await this.list(filter, query, true);
+    return { ...page, data: page.data.map((t) => ({ ...t, myRole: roles.get(t.id) ?? null, permissions: permissionsOf(roles.get(t.id) ?? null) })) };
   }
 
   async findOne(id: string) {
@@ -80,45 +143,57 @@ export class TournamentsService {
     // Todo torneo vive en una liga del organizador (la indicada o su liga por defecto).
     const leagueId = await this.leagues.forNewTournament(user, dto.leagueId);
     // El propietario sale del JWT; el DTO ni siquiera admite organizerId.
+    const information = mergeInformation(undefined, dto.information);
+    const registration = { ...DEFAULT_REGISTRATION, ...definedInformation(dto.registration) };
+    validateInformation(information, registration.deadline);
     const created = await this.tournaments.create({
       ...dto,
       leagueId,
+      information,
+      registration,
       settings: mergeSettings(DEFAULT_SETTINGS, dto.settings),
       organizerId: toObjectId(user.id),
     });
-    return serialize(created.toObject());
+    return serialize(created.toObject(), { includePrivateTournamentContact: true });
   }
 
   /** Datos y configuración. El estado no: tiene acciones propias (start/finish). */
   async update(id: string, dto: UpdateTournamentDto, user: AuthUser) {
-    await this.ownership.tournament(id, user);
-    // Cambiar de liga: solo a otra liga propia.
-    if (dto.leagueId) await this.leagues.owned(dto.leagueId, user);
+    await this.ownership.tournament(id, user, Permission.SETTINGS);
+    // Cambiar de liga: solo el propietario y solo a otra liga suya (un colaborador no puede
+    // llevarse el torneo a su propia liga).
+    if (dto.leagueId) {
+      await this.ownership.tournament(id, user, Permission.DELETE);
+      await this.leagues.owned(dto.leagueId, user);
+    }
     // Con el cerrojo: no se cuela un cambio en un torneo que se está finalizando.
-    return this.ownership.inTournament(id, async (session) => {
+    return this.ownership.inTournament(id, { user, permission: Permission.SETTINGS }, async (session) => {
       const current = (await this.tournaments.findById(id).session(session).lean())!;
       assertDateRange(
         dto.startDate ?? current.startDate,
         dto.endDate === undefined ? current.endDate : dto.endDate,
       );
-      const { resetSchedule, trackedTeamIds, ...fields } = dto;
+      const { resetSchedule, releaseAssignments: _releaseAssignments, trackedTeamIds: _trackedTeamIds, ...fields } = dto;
       const update: Record<string, unknown> = { ...fields };
+      const information = mergeInformation(current.information, dto.information);
+      const registration = { ...DEFAULT_REGISTRATION, ...current.registration, ...definedInformation(dto.registration) };
+      validateInformation(information, registration.deadline);
+      if (dto.registration?.maxTeams != null) {
+        const enrolled = await this.enrollments.countDocuments({ tournamentId: toObjectId(id) }).session(session);
+        if (registration.maxTeams! < enrolled) throw new BadRequestException(`Ya hay ${enrolled} equipos inscritos: el cupo no puede ser menor`);
+      }
+      if (dto.information !== undefined) update.information = information;
+      // Otra duración cambia lo que ocupan sus partidos con cancha: se rechaza si alguno chocaría.
+      const duration = information.schedule.durationMinutes ?? DEFAULT_MATCH_MINUTES;
+      if (duration !== (current.information?.schedule?.durationMinutes ?? DEFAULT_MATCH_MINUTES)) {
+        await this.venues.revalidateTournament(session, toObjectId(id), duration);
+        await this.referees.revalidate(session, { tournamentId: toObjectId(id) }, { tournamentId: toObjectId(id), minutes: duration });
+      }
+      if (dto.registration !== undefined) update.registration = registration;
       // Explícito: la liga se guarda como ObjectId (las consultas por liga lo comparan así).
       if (dto.leagueId) update.leagueId = toObjectId(dto.leagueId);
-      Object.assign(update, await this.trackedUpdate(id, current, dto.dataCoverage, trackedTeamIds, session));
-      // PARTIAL → FULL con partidos sueltos (a mano) en un formato con estructura: esos partidos
-      // entrarían en tablas o cuadros que no los esperan. Primero hay que pasar el formato a Liga.
-      const nextSystem = dto.settings?.system ?? current.settings?.system ?? CompetitionSystem.LEAGUE;
-      if (
-        dto.dataCoverage === DataCoverage.FULL &&
-        coverageOf(current) === DataCoverage.PARTIAL &&
-        nextSystem !== CompetitionSystem.LEAGUE &&
-        (await this.matches.exists({ tournamentId: toObjectId(id), stage: null }).session(session))
-      ) {
-        throw new ConflictException(
-          'El torneo tiene partidos registrados a mano fuera de la estructura de su formato. Para pasar a cobertura completa, cambia antes el formato a Liga.',
-        );
-      }
+      update.dataCoverage = DataCoverage.FULL;
+      update.trackedTeamIds = [];
       if (dto.settings) {
         const next = mergeSettings(current.settings ?? DEFAULT_SETTINGS, dto.settings);
         // La estructura (formato, vueltas, grupos, playoffs) no cambia con partidos ya generados:
@@ -141,6 +216,8 @@ export class TournamentsService {
               'El torneo tiene un calendario generado. Para cambiar su formato o estructura envía resetSchedule: true (se borrarán sus partidos y jornadas, ninguno jugado).',
             );
           }
+          await assertAssignmentsReleased(this.matches, tournamentId, dto.releaseAssignments, session);
+          await this.log.deleting(session, { userId: user.id }, { tournamentId }, MatchLogCause.FORMAT_CHANGED, { bulk: true });
           await this.matches.deleteMany({ tournamentId }, { session });
           await this.rounds.deleteMany({ tournamentId }, { session });
         }
@@ -160,52 +237,14 @@ export class TournamentsService {
       const updated = await this.tournaments
         .findByIdAndUpdate(id, update, { new: true, runValidators: true, session })
         .lean();
-      return serialize(withCoverage(updated!));
+      return serialize(withCoverage(updated!), { includePrivateTournamentContact: true });
     });
-  }
-
-  /**
-   * Equipos en seguimiento (6G). FULL → siempre vacío (enviar equipos con FULL es un error).
-   * PARTIAL → si llegan, deben estar TODOS inscritos (se comprueba dentro del cerrojo: no se cuela
-   * una baja entre la comprobación y la escritura); nunca se inscribe a nadie por seguirlo. Lista
-   * vacía permitida (torneo recién creado o PARTIAL de 6F): la UI pide elegir al menos uno.
-   */
-  private async trackedUpdate(
-    id: string,
-    current: { dataCoverage?: DataCoverage | null },
-    nextCoverage: DataCoverage | undefined,
-    trackedTeamIds: string[] | undefined,
-    session: ClientSession,
-  ): Promise<{ trackedTeamIds?: Types.ObjectId[] }> {
-    if ((nextCoverage ?? coverageOf(current)) === DataCoverage.FULL) {
-      if (trackedTeamIds?.length) throw new BadRequestException('Los equipos en seguimiento solo existen con cobertura parcial');
-      return { trackedTeamIds: [] };
-    }
-    if (!trackedTeamIds) return {};
-    const ids = trackedTeamIds.map(toObjectId);
-    const enrolled = await this.enrollments
-      .find({ tournamentId: toObjectId(id), teamId: { $in: ids } })
-      .select('teamId')
-      .session(session)
-      .lean();
-    const ok = new Set(enrolled.map((e) => e.teamId.toHexString()));
-    const missing = trackedTeamIds.filter((t) => !ok.has(t));
-    if (missing.length) {
-      throw new ConflictException({
-        statusCode: 409,
-        error: 'Conflict',
-        code: 'TRACKED_TEAM_NOT_ENROLLED',
-        message: 'Solo se puede dar seguimiento a equipos inscritos en este torneo.',
-        teamIds: missing,
-      });
-    }
-    return { trackedTeamIds: ids };
   }
 
   // ─── Ciclo de vida: DRAFT → ACTIVE → FINISHED ───────────────────────────────
 
   async start(id: string, user: AuthUser) {
-    const current = await this.ownership.ownedTournament(id, user);
+    const current = await this.ownership.ownedTournament(id, user, Permission.LIFECYCLE);
     if (current.status !== TournamentStatus.DRAFT) {
       throw new ConflictException(
         current.status === TournamentStatus.ACTIVE
@@ -213,7 +252,10 @@ export class TournamentsService {
           : 'El torneo está finalizado y no puede reabrirse',
       );
     }
-    return this.transition(id, TournamentStatus.DRAFT, TournamentStatus.ACTIVE);
+    // En transacción con el cerrojo: el permiso se revalida (una revocación concurrente gana).
+    return this.ownership.inTournament(id, { user, permission: Permission.LIFECYCLE }, (session) =>
+      this.transition(id, TournamentStatus.DRAFT, TournamentStatus.ACTIVE, session),
+    );
   }
 
   /**
@@ -226,9 +268,9 @@ export class TournamentsService {
    * de que se cuente.
    */
   async finish(id: string, dto: FinishTournamentDto, user: AuthUser) {
-    const current = await this.ownership.ownedTournament(id, user);
+    const current = await this.ownership.ownedTournament(id, user, Permission.LIFECYCLE);
     assertFinishable(current.status);
-    return this.ownership.inTournament(id, async (session, status) => {
+    return this.ownership.inTournament(id, { user, permission: Permission.LIFECYCLE }, async (session, status) => {
       assertFinishable(status);
       // Formatos con eliminatoria: el campeón es el ganador de la final; sin él no hay cierre.
       const blockers = await this.competition.finishBlockers(toObjectId(id), session);
@@ -275,9 +317,9 @@ export class TournamentsService {
   }
 
   /** Cambio de estado condicionado al estado actual (evita carreras entre dos peticiones). */
-  private async transition(id: string, from: TournamentStatus, to: TournamentStatus) {
+  private async transition(id: string, from: TournamentStatus, to: TournamentStatus, session: ClientSession | null = null) {
     const updated = await this.tournaments
-      .findOneAndUpdate({ _id: id, status: from }, { status: to }, { new: true })
+      .findOneAndUpdate({ _id: id, status: from }, { status: to }, { new: true, session })
       .lean();
     if (!updated) throw new ConflictException('El estado del torneo cambió; recarga e inténtalo de nuevo');
     return serialize(withCoverage(updated));
@@ -285,20 +327,30 @@ export class TournamentsService {
 
   /** Solo se elimina un torneo sin partidos: los partidos son historia de los jugadores. */
   async remove(id: string, user: AuthUser) {
-    await this.ownership.tournament(id, user);
-    await this.ownership.inTournament(id, async (session) => {
+    await this.ownership.tournament(id, user, Permission.DELETE);
+    const imageId = await this.ownership.inTournament(id, { user, permission: Permission.DELETE }, async (session) => {
       const tournamentId = toObjectId(id);
+      const before = await this.tournaments.findById(id).select('+logoPublicId').session(session).lean();
       if (await this.matches.exists({ tournamentId }).session(session)) {
         throw new ConflictException(
           'El torneo tiene partidos registrados y no puede eliminarse. Cámbialo a FINISHED o elimina antes sus partidos sin resultado.',
         );
       }
-      // Sin partidos no hay historia: se retiran inscripciones, participaciones y jornadas.
+      // Sin partidos no hay historia: se retiran inscripciones, participaciones, jornadas y lo
+      // disciplinario (sin partidos solo puede haber cambios de reglamento en el historial).
       await this.enrollments.deleteMany({ tournamentId }, { session });
       await this.memberships.deleteMany({ tournamentId }, { session });
       await this.rounds.deleteMany({ tournamentId }, { session });
+      await this.sanctions.deleteMany({ tournamentId }, { session });
+      await this.disciplineLog.deleteMany({ tournamentId }, { session });
+      // Historial de partidos (solo puede tener partidos ya eliminados: un torneo con partidos no se borra).
+      await this.matchLogs.deleteMany({ tournamentId }, { session });
+      await this.members.deleteMany({ tournamentId }, { session });
+      await this.invitations.deleteMany({ tournamentId }, { session });
       await this.tournaments.deleteOne({ _id: id }, { session });
+      return before?.logoPublicId;
     });
+    await this.cloudinary.destroy(imageId);
   }
 
   // ─── Inscripciones (TournamentTeam) ─────────────────────────────────────────
@@ -341,14 +393,14 @@ export class TournamentsService {
    * participar en tu torneo; la inscripción solo afecta a tu torneo.
    */
   async addTeam(tournamentId: string, teamId: string, user: AuthUser) {
-    await this.ownership.tournament(tournamentId, user);
+    await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
     if (!(await this.teams.exists({ _id: teamId })))
       throw new NotFoundException(`Equipo ${teamId} no encontrado`);
     const filter = {
       tournamentId: toObjectId(tournamentId),
       teamId: toObjectId(teamId),
     };
-    return this.ownership.inTournament(tournamentId, async (session) => {
+    return this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
       if (await this.enrollments.exists(filter).session(session))
         throw new ConflictException('El equipo ya está inscrito en este torneo');
       const [created] = await this.enrollments.create([filter], { session });
@@ -357,13 +409,13 @@ export class TournamentsService {
   }
 
   async removeTeam(tournamentId: string, teamId: string, user: AuthUser) {
-    await this.ownership.tournament(tournamentId, user);
+    await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
     const filter = {
       tournamentId: toObjectId(tournamentId),
       teamId: toObjectId(teamId),
     };
     // Con el cerrojo: no se retira un equipo mientras se le programa un partido.
-    await this.ownership.inTournament(tournamentId, async (session) => {
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
       if (!(await this.enrollments.exists(filter).session(session)))
         throw new NotFoundException('El equipo no está inscrito en este torneo');
       const hasMatches = await this.matches
@@ -387,6 +439,7 @@ export class TournamentsService {
   private async list(
     filter: Record<string, unknown>,
     query: TournamentQueryDto,
+    includePrivateTournamentContact = false,
   ) {
     const [items, total] = await Promise.all([
       this.tournaments
@@ -397,7 +450,7 @@ export class TournamentsService {
         .lean(),
       this.tournaments.countDocuments(filter),
     ]);
-    return paginated(serialize(items.map(withCoverage)), total, query);
+    return paginated(serialize(items.map(withCoverage), { includePrivateTournamentContact }), total, query);
   }
 }
 

@@ -24,6 +24,7 @@ import {
 } from '../../common/utils/serialize.js';
 import { todayISODate } from '../../common/utils/dates.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
+import { Permission } from '../../common/authorization/permissions.js';
 import { TeamAccessService } from '../../common/authorization/team-access.service.js';
 import { publicPlayer } from '../../common/utils/public.js';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -166,7 +167,7 @@ export class MembershipsService {
    * Nunca toca participaciones de otros torneos. Las dos escrituras van en una transacción.
    */
   async register(tournamentId: string, playerId: string, dto: RegisterPlayerDto, user: AuthUser) {
-    await this.ownership.tournament(tournamentId, user);
+    await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
     await this.assertPlayer(playerId);
     const enrolled = await this.enrollments.exists({
       tournamentId: toObjectId(tournamentId),
@@ -176,7 +177,7 @@ export class MembershipsService {
     const jerseyNumber = dto.jerseyNumber ?? null;
 
     // Con el cerrojo del torneo: no se cruza con finalizarlo ni con otra alta del mismo jugador.
-    await this.ownership.inTournament(tournamentId, async (session) => {
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
       const current = await this.memberships
         .findOne({ tournamentId: toObjectId(tournamentId), playerId: toObjectId(playerId), active: true })
         .session(session);
@@ -217,8 +218,8 @@ export class MembershipsService {
 
   /** Da de baja al jugador de MI torneo (cierra su participación; el historial se conserva). */
   async unregister(tournamentId: string, playerId: string, user: AuthUser) {
-    await this.ownership.tournament(tournamentId, user);
-    await this.ownership.inTournament(tournamentId, async (session) => {
+    await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
       const current = await this.memberships
         .findOne({ tournamentId: toObjectId(tournamentId), playerId: toObjectId(playerId), active: true })
         .session(session);
@@ -273,7 +274,7 @@ export class MembershipsService {
     await this.assertPlayer(playerId);
     const [tid, team, pid] = [toObjectId(tournamentId), toObjectId(teamId), toObjectId(playerId)];
 
-    await this.ownership.inTournament(tournamentId, async (session) => {
+    await this.ownership.inTournament(tournamentId, null, async (session) => {
       const enrolled = await this.enrollments.exists({ tournamentId: tid, teamId: team }).session(session);
       if (!enrolled) throw new NotFoundException('Tu equipo no está inscrito en este torneo');
       const inRoster = await this.rosters.exists({ teamId: team, playerId: pid, status: TeamRosterStatus.ACTIVE }).session(session);
@@ -311,7 +312,7 @@ export class MembershipsService {
   /** DELETE /teams/:id/tournaments/:tournamentId/players/:playerId — baja del jugador en el torneo (el historial se conserva). */
   async unregisterByTeam(teamId: string, tournamentId: string, playerId: string, user: AuthUser) {
     await this.teamAccess.requireManager(teamId, user);
-    await this.ownership.inTournament(tournamentId, async (session) => {
+    await this.ownership.inTournament(tournamentId, null, async (session) => {
       const current = await this.memberships
         .findOne({ tournamentId: toObjectId(tournamentId), teamId: toObjectId(teamId), playerId: toObjectId(playerId), active: true })
         .session(session);

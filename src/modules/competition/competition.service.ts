@@ -2,17 +2,18 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { ClientSession } from 'mongoose';
-import { Tournament, DEFAULT_SETTINGS, coverageOf } from '../tournaments/schemas/tournament.schema.js';
-import { assertFullCoverage } from '../tournaments/coverage.js';
+import { Tournament, DEFAULT_SETTINGS } from '../tournaments/schemas/tournament.schema.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
 import { Match } from '../matches/schemas/match.schema.js';
 import { Round } from '../rounds/schemas/round.schema.js';
 import { PlayerMatchStats } from '../matches/schemas/player-match-stats.schema.js';
 import { Team } from '../teams/schemas/team.schema.js';
-import { CompetitionSystem, DataCoverage, KnockoutTiebreak, MatchStatus, PhaseType } from '../../common/enums/index.js';
+import { CompetitionSystem, KnockoutTiebreak, MatchLogCause, MatchLogSource, MatchStatus, PhaseType } from '../../common/enums/index.js';
+import { MatchLogService, type Actor } from '../match-log/match-log.service.js';
 import { toObjectId } from '../../common/utils/serialize.js';
 import { teamRef } from '../../common/utils/public.js';
 import { assertStarted, OwnershipService } from '../../common/authorization/ownership.service.js';
+import { Permission } from '../../common/authorization/permissions.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { bracketSize, knockoutRoundNumber, phaseRounds, reconcile, roundName, tiebreakFor } from './bracket.js';
 import { knockoutMatch, manualBracketSizes, manualKnockoutPhase, matchDoc, planKnockout } from './planner.js';
@@ -97,6 +98,7 @@ export class CompetitionService {
     @InjectModel(Team.name) private readonly teams: Model<Team>,
     @InjectModel(PlayerMatchStats.name) private readonly stats: Model<PlayerMatchStats>,
     private readonly ownership: OwnershipService,
+    private readonly log: MatchLogService,
   ) {}
 
   /** Torneo + partidos + inscritos + equipos (4 consultas fijas). */
@@ -124,7 +126,7 @@ export class CompetitionService {
   /** GET /tournaments/:id/structure (público). Tablas, cuadro y campeón: solo con cobertura FULL. */
   async structure(id: string) {
     const { tournament, teamMap, input } = await this.context(id);
-    assertFullCoverage(tournament);
+
     const view = buildStructure(input);
     const s = { ...DEFAULT_SETTINGS, ...tournament.settings };
     return {
@@ -152,11 +154,11 @@ export class CompetitionService {
    * a la concurrencia: dentro del cerrojo, una segunda petición ve la fase ya creada y recibe 409.
    */
   async advance(id: string, dto: AdvancePhaseDto, user: AuthUser) {
-    await this.ownership.tournament(id, user);
-    await this.ownership.inTournament(id, async (session, status) => {
+    await this.ownership.tournament(id, user, Permission.SCHEDULE);
+    await this.ownership.inTournament(id, { user, permission: Permission.SCHEDULE }, async (session, status) => {
       assertStarted(status);
       const { tournament, input } = await this.context(id, session);
-      assertFullCoverage(tournament); // la eliminatoria saldría de una tabla incompleta
+
       const phases = mergeTiebreaks(tournament.phases ?? [], dto.tiebreaks ?? []);
       const view = buildStructure({ ...input, phases });
       if (!view.next) throw new ConflictException('Este torneo no tiene otra fase por generar');
@@ -186,9 +188,9 @@ export class CompetitionService {
    * la usa (advance) o la arma a mano.
    */
   async previewAdvance(id: string, dto: AdvancePhaseDto, user: AuthUser) {
-    await this.ownership.tournament(id, user);
+    await this.ownership.tournament(id, user, Permission.SCHEDULE);
     const { tournament, input, teamMap } = await this.context(id);
-    assertFullCoverage(tournament);
+
     const view = buildStructure({ ...input, phases: mergeTiebreaks(tournament.phases ?? [], dto.tiebreaks ?? []) });
     if (!view.next) throw new ConflictException('Este torneo no tiene otra fase por generar');
     const plan = planNextKnockout(view, tournament.settings, dto, await this.nextRoundNumber(toObjectId(id), null));
@@ -236,10 +238,10 @@ export class CompetitionService {
    * se siguen derivando de los resultados.
    */
   async createTie(id: string, phaseIndex: number, dto: CreateTieDto, user: AuthUser) {
-    await this.ownership.tournament(id, user);
-    await this.ownership.inTournament(id, async (session) => {
+    await this.ownership.tournament(id, user, Permission.SCHEDULE);
+    await this.ownership.inTournament(id, { user, permission: Permission.SCHEDULE }, async (session) => {
       const { tournament, input } = await this.context(id, session);
-      assertFullCoverage(tournament);
+
       const phases = tournament.phases ?? [];
       const phase = this.manualPhase(phases, phaseIndex);
       this.assertHandRound(phase, dto.round);
@@ -299,7 +301,9 @@ export class CompetitionService {
           { upsert: true, session },
         );
       }
-      await this.matches.insertMany(docs.map((d) => d.match), { session });
+      const inserted = await this.matches.insertMany(docs.map((d) => d.match), { session });
+      // Cruce armado a mano: sus partidos se registran como creados por el organizador.
+      await this.log.created(session, { userId: user.id }, inserted.map((m) => m.toObject()));
       const next = phases.map((p) => (p.index === phase.index ? { ...p, bracket: [...(p.bracket ?? []), tie] } : p));
       await this.tournaments.updateOne({ _id: tid }, { $set: { phases: next } }, { session });
     });
@@ -308,8 +312,8 @@ export class CompetitionService {
 
   /** Quitar un cruce armado a mano (y sus partidos) mientras ninguno tenga resultado ni estadísticas. */
   async deleteTie(id: string, phaseIndex: number, round: number, slot: number, user: AuthUser) {
-    await this.ownership.tournament(id, user);
-    await this.ownership.inTournament(id, async (session) => {
+    await this.ownership.tournament(id, user, Permission.SCHEDULE);
+    await this.ownership.inTournament(id, { user, permission: Permission.SCHEDULE }, async (session) => {
       const { tournament, matches } = await this.context(id, session);
       const phases = tournament.phases ?? [];
       const phase = this.manualPhase(phases, phaseIndex);
@@ -320,7 +324,10 @@ export class CompetitionService {
         legs.some((m) => m.status === MatchStatus.LIVE || m.status === MatchStatus.FINISHED || m.homeScore !== null || m.awayScore !== null) ||
         (legs.length > 0 && (await this.stats.exists({ matchId: { $in: legs.map((m) => toObjectId(m.id)) } }).session(session)));
       if (played) throw new ConflictException('Ese cruce ya tiene resultado: no se puede quitar');
-      if (legs.length) await this.matches.deleteMany({ _id: { $in: legs.map((m) => toObjectId(m.id)) } }, { session });
+      if (legs.length) {
+        await this.log.deleting(session, { userId: user.id }, { _id: { $in: legs.map((m) => toObjectId(m.id)) } }, MatchLogCause.TIE_REMOVED);
+        await this.matches.deleteMany({ _id: { $in: legs.map((m) => toObjectId(m.id)) } }, { session });
+      }
       const next = phases.map((p) => (p.index === phase.index ? { ...p, bracket: (p.bracket ?? []).filter((t) => !(t.round === round && t.slot === slot)) } : p));
       await this.tournaments.updateOne({ _id: toObjectId(id) }, { $set: { phases: next } }, { session });
     });
@@ -329,7 +336,7 @@ export class CompetitionService {
 
   /**
    * Lugar en la estructura de un partido programado a mano (jornadas del organizador). Se llama
-   * dentro del cerrojo. Liga clásica o seguimiento parcial: sin estructura (como siempre). Fase
+   * dentro del cerrojo. Liga clásica: sin estructura. Fase
    * regular de liga + playoffs: cuenta en su tabla (la fase se crea con el primer partido). Grupos:
    * cuenta en el grupo de los dos equipos. Eliminación: los partidos se arman por cruces.
    */
@@ -339,7 +346,7 @@ export class CompetitionService {
     awayTeamId: string,
   ): Promise<{ stage: MatchStage | null; createPhase: TournamentPhase | null }> {
     const s = { ...DEFAULT_SETTINGS, ...tournament.settings };
-    if (s.system === CompetitionSystem.LEAGUE || coverageOf(tournament) === DataCoverage.PARTIAL) return { stage: null, createPhase: null };
+    if (s.system === CompetitionSystem.LEAGUE) return { stage: null, createPhase: null };
     const first = phasesOf(s.system)[0];
     if (first === PhaseType.KNOCKOUT) {
       throw new ConflictException('En eliminación directa los partidos se arman por cruces: agrégalos desde Competición');
@@ -368,7 +375,11 @@ export class CompetitionService {
    * partidos de las llaves que ya tienen sus dos equipos, corrige los de llaves sin jugar cuyo
    * equipo cambió y rechaza (409) cambios que alterarían una llave ya jugada.
    */
-  async syncKnockout(tournamentId: Types.ObjectId, session: ClientSession) {
+  /**
+   * `actor`: quien desencadenó el cambio (al capturar o editar). Lo que el cuadro borra o
+   * reasigna queda en el historial con origen SYSTEM y causa BRACKET_SYNC.
+   */
+  async syncKnockout(tournamentId: Types.ObjectId, session: ClientSession, actor: Actor) {
     const { tournament, matches, input } = await this.context(tournamentId, session);
     const rules = tiebreakRules(input);
     for (const phase of tournament.phases ?? []) {
@@ -377,13 +388,21 @@ export class CompetitionService {
       if (r.conflicts.length) {
         throw new ConflictException(`${r.conflicts[0]}. Corrige primero los resultados de las rondas siguientes.`);
       }
-      if (r.remove.length) await this.matches.deleteMany({ _id: { $in: r.remove.map(toObjectId) } }, { session });
+      if (r.remove.length) {
+        await this.log.deleting(session, { ...actor, source: MatchLogSource.SYSTEM }, { _id: { $in: r.remove.map(toObjectId) } }, MatchLogCause.BRACKET_SYNC);
+        await this.matches.deleteMany({ _id: { $in: r.remove.map(toObjectId) } }, { session });
+      }
       for (const u of r.update) {
+        const before = await this.matches.findById(toObjectId(u.matchId)).session(session).lean();
         await this.matches.updateOne(
           { _id: toObjectId(u.matchId) },
           { homeTeamId: toObjectId(u.homeTeamId), awayTeamId: toObjectId(u.awayTeamId) },
           { session },
         );
+        if (before) {
+          const after = { ...before, homeTeamId: toObjectId(u.homeTeamId), awayTeamId: toObjectId(u.awayTeamId) };
+          await this.log.teamsBySystem(session, actor, before, after);
+        }
       }
       if (r.create.length) {
         await this.matches.insertMany(r.create.map((spec) => matchDoc(tournamentId, knockoutMatch(phase, spec))), { session });
@@ -476,13 +495,10 @@ export class CompetitionService {
     if (next.penalties.home === next.penalties.away) throw new BadRequestException('La tanda de penales no puede terminar empatada');
   }
 
-  /**
-   * ¿Puede finalizarse? (formatos con eliminatoria: la final debe tener ganador). En PARTIAL Cancha
-   * no lleva el cuadro completo: no se exige campeón (tampoco se publica).
-   */
+  /** Los formatos con eliminatoria requieren un campeón antes de finalizar. */
   async finishBlockers(tournamentId: Types.ObjectId, session: ClientSession): Promise<string[]> {
-    const { tournament, input } = await this.context(tournamentId, session);
-    if (input.system === CompetitionSystem.LEAGUE || coverageOf(tournament) === DataCoverage.PARTIAL) return [];
+    const { input } = await this.context(tournamentId, session);
+    if (input.system === CompetitionSystem.LEAGUE) return [];
     const view = buildStructure(input);
     if (view.championTeamId) return [];
     if (view.next) return [`Falta generar la eliminatoria. ${view.next.blockers.join('. ')}`.trim()];

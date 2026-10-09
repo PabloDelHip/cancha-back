@@ -123,6 +123,15 @@ async function run() {
       registrationRequests: model(Models.registrationRequest),
       // Ligas: cada torneo vive en una (los del seed, en la liga por defecto de su organizador).
       leagues: model(Models.league),
+      // Disciplina: sanciones e historial referencian torneos, jugadores y partidos.
+      sanctions: model(Models.sanction),
+      disciplineLog: model(Models.disciplineLog),
+      // Sedes y canchas del organizador (Módulo 2A).
+      venues: model(Models.venue),
+      referees: model(Models.referee),
+      matchLogs: model(Models.matchLog),
+      tournamentMembers: model(Models.tournamentMember),
+      tournamentInvitations: model(Models.tournamentInvitation),
     };
 
     const all = Object.values(m) as Model<unknown>[];

@@ -69,7 +69,7 @@ interface TournamentLike {
 
 /**
  * Lo necesario para pintar y enlazar un torneo (sin organizador ni configuración interna).
- * `dataCoverage` (6F): FULL salvo PARTIAL explícito; quien lo lea debe incluirlo en su `select`.
+ * `dataCoverage` se conserva como FULL para clientes anteriores.
  */
 export function tournamentRef(t: TournamentLike) {
   return {
@@ -80,7 +80,7 @@ export function tournamentRef(t: TournamentLike) {
     format: t.format,
     startDate: t.startDate,
     endDate: t.endDate ?? null,
-    dataCoverage: (t.dataCoverage === 'PARTIAL' ? 'PARTIAL' : 'FULL') as 'FULL' | 'PARTIAL',
+    dataCoverage: 'FULL' as const,
   };
 }
 /** En las entradas de las funciones puras de perfil, sin `dataCoverage` = FULL. */

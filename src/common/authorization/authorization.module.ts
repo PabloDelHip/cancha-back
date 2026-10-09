@@ -5,6 +5,7 @@ import { OwnershipService } from './ownership.service.js';
 import { TeamAccessService } from './team-access.service.js';
 import { OrganizerAccessService } from './organizer-access.service.js';
 import { LeagueAccessService } from './league-access.service.js';
+import { TournamentAccessService } from './tournament-access.service.js';
 
 @Global()
 @Module({
@@ -19,9 +20,10 @@ import { LeagueAccessService } from './league-access.service.js';
       Models.league,
       Models.teamRoster,
       Models.membership,
+      Models.tournamentMember,
     ]),
   ],
-  providers: [OwnershipService, TeamAccessService, OrganizerAccessService, LeagueAccessService],
-  exports: [OwnershipService, TeamAccessService, OrganizerAccessService, LeagueAccessService],
+  providers: [OwnershipService, TeamAccessService, OrganizerAccessService, LeagueAccessService, TournamentAccessService],
+  exports: [OwnershipService, TeamAccessService, OrganizerAccessService, LeagueAccessService, TournamentAccessService],
 })
 export class AuthorizationModule {}

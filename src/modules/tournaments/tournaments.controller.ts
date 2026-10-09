@@ -8,11 +8,16 @@ import {
   Param,
   Patch,
   Post,
+  Put,
+  UploadedFile,
+  UseInterceptors,
   Query,
 } from '@nestjs/common';
 import { IsObjectIdPipe } from '@nestjs/mongoose';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiConflictResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -20,6 +25,8 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { imageUploadOptions, type UploadedImage } from '../media/image-upload.js';
 import { TournamentsService } from './tournaments.service.js';
 import {
   CreateTournamentDto,
@@ -36,6 +43,28 @@ import type { AuthUser } from '../auth/auth.types.js';
 @Controller()
 export class TournamentsController {
   constructor(private readonly service: TournamentsService) {}
+
+  @Get('admin/tournaments/:id')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Detalle del torneo para su organizador, incluido contacto privado' })
+  findOwned(@Param('id', IsObjectIdPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.service.findOwned(id, user);
+  }
+
+  @Put('tournaments/:id/logo')
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', required: ['file'], properties: { file: { type: 'string', format: 'binary' } } } })
+  @UseInterceptors(FileInterceptor('file', imageUploadOptions))
+  setLogo(@Param('id', IsObjectIdPipe) id: string, @UploadedFile() file: UploadedImage | undefined, @CurrentUser() user: AuthUser) {
+    return this.service.setLogo(id, file, user);
+  }
+
+  @Delete('tournaments/:id/logo')
+  @ApiBearerAuth()
+  removeLogo(@Param('id', IsObjectIdPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.service.removeLogo(id, user);
+  }
 
   @Public()
   @Get('tournaments')

@@ -128,7 +128,7 @@ describe('Ciclo de vida DRAFT → ACTIVE → FINISHED', () => {
     await result(A, played, 2, 1).expect(200);
     await match(A, id, 2, t2, t3);
     const postponed = await match(A, id, 3, t3, t1);
-    await as(A).patch(`/api/matches/${postponed}`).send({ status: 'POSTPONED' }).expect(200);
+    await as(A).patch(`/api/matches/${postponed}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(200);
 
     const refused = await as(A).post(`/api/tournaments/${id}/finish`).send({}).expect(409);
     expect(refused.body.summary).toMatchObject({ total: 3, finished: 1, scheduled: 1, postponed: 1, pending: 2 });
@@ -237,12 +237,12 @@ describe('Jornadas', () => {
     const ok = await match(A, id, 5, t[2], t[3]);
     // mover a una jornada donde uno de sus equipos ya juega → 409
     const other = await match(A, id, 6, t[3], t[2]);
-    await as(A).patch(`/api/matches/${other}`).send({ round: 5 }).expect(409);
+    await as(A).patch(`/api/matches/${other}`).send({ reason: 'Motivo de prueba', round: 5 }).expect(409);
     // un partido cancelado no ocupa la jornada
-    await as(A).patch(`/api/matches/${ok}`).send({ status: 'CANCELLED' }).expect(200);
-    await as(A).patch(`/api/matches/${other}`).send({ round: 5 }).expect(200);
+    await as(A).patch(`/api/matches/${ok}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(200);
+    await as(A).patch(`/api/matches/${other}`).send({ reason: 'Motivo de prueba', round: 5 }).expect(200);
     // …y no puede "descancelarse" si ahora choca
-    await as(A).patch(`/api/matches/${ok}`).send({ status: 'SCHEDULED' }).expect(409);
+    await as(A).patch(`/api/matches/${ok}`).send({ reason: 'Motivo de prueba', status: 'SCHEDULED' }).expect(409);
   });
 
   it('equipos inscritos y distintos', async () => {
@@ -264,7 +264,7 @@ describe('Jornadas', () => {
     await as(B).delete(`/api/tournaments/${id}/rounds/2`).expect(403);
     await newMatch(B, id, 8, t[0], t[1]).expect(403);
     const m = (await api().get(`/api/tournaments/${id}/matches`)).body[0];
-    await as(B).patch(`/api/matches/${m.id}`).send({ round: 9 }).expect(403);
+    await as(B).patch(`/api/matches/${m.id}`).send({ reason: 'Motivo de prueba', round: 9 }).expect(403);
     expect((await api().get(`/api/tournaments/${id}/rounds`)).body.map((r: { number: number }) => r.number)).not.toContain(9);
   });
 });
@@ -335,7 +335,7 @@ describe('Generación de calendario (POST /tournaments/:id/schedule)', () => {
     const id = await tournament(A, { status: 'ACTIVE' });
     await teams(A, id, 4);
     const matches = (await schedule(A, id, { legs: 1 }).expect(201)).body.matches as ApiMatch[];
-    await as(A).patch(`/api/matches/${matches[0].id}`).send({ status: 'LIVE' }).expect(200);
+    await as(A).patch(`/api/matches/${matches[0].id}`).send({ reason: 'Motivo de prueba', status: 'LIVE' }).expect(200);
     await schedule(A, id, { legs: 1, replaceExisting: true }).expect(409);
     await result(A, matches[0].id, 1, 0).expect(200);
     await schedule(A, id, { legs: 1, replaceExisting: true }).expect(409);
@@ -381,17 +381,17 @@ describe('POSTPONED y CANCELLED', () => {
 
   it('SCHEDULED → POSTPONED → SCHEDULED reprogramado conserva el partido y no suma en la tabla', async () => {
     const m = await match(A, id, 1, t[0], t[1]);
-    const postponed = await as(A).patch(`/api/matches/${m}`).send({ status: 'POSTPONED' }).expect(200);
+    const postponed = await as(A).patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(200);
     expect(postponed.body).toMatchObject({ id: m, status: 'POSTPONED', round: 1 });
     expect((await standings(id)).every((r) => r.played === 0)).toBe(true);
 
-    const back = await as(A).patch(`/api/matches/${m}`).send({ status: 'SCHEDULED', date: '2027-04-01', time: '20:30' }).expect(200);
+    const back = await as(A).patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', status: 'SCHEDULED', date: '2027-04-01', time: '20:30' }).expect(200);
     expect(back.body).toMatchObject({ id: m, status: 'SCHEDULED', date: '2027-04-01', time: '20:30', round: 1 });
   });
 
   it('un pospuesto que se jugó puede capturarse (→ FINISHED) y entonces sí cuenta', async () => {
     const m = await match(A, id, 2, t[0], t[1]);
-    await as(A).patch(`/api/matches/${m}`).send({ status: 'POSTPONED' }).expect(200);
+    await as(A).patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(200);
     await result(A, m, 2, 0).expect(200);
     expect((await standings(id)).find((r) => r.teamId === t[0])).toMatchObject({ played: 1, points: 3 });
   });
@@ -400,14 +400,14 @@ describe('POSTPONED y CANCELLED', () => {
     const m = await match(A, id, 3, t[0], t[1]);
     await result(A, m, 1, 1).expect(200);
     for (const status of ['POSTPONED', 'CANCELLED', 'SCHEDULED']) {
-      await as(A).patch(`/api/matches/${m}`).send({ status }).expect(409);
+      await as(A).patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', status }).expect(409);
     }
     expect((await api().get(`/api/matches/${m}`)).body).toMatchObject({ status: 'FINISHED', homeScore: 1 });
   });
 
   it('CANCELLED no se captura y no cuenta en la tabla', async () => {
     const m = await match(A, id, 4, t[0], t[1]);
-    await as(A).patch(`/api/matches/${m}`).send({ status: 'CANCELLED' }).expect(200);
+    await as(A).patch(`/api/matches/${m}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(200);
     await result(A, m, 3, 0).expect(409);
     const played = (await standings(id)).find((r) => r.teamId === t[0])!.played;
     expect(played).toBe(2);
@@ -451,9 +451,9 @@ describe('Torneo FINISHED = historial inmutable', () => {
 
   it('partidos: no se crean, editan, posponen ni eliminan', async () => {
     expect((await newMatch(A, x.id, 4, x.home, x.spare).expect(409)).body.message).toMatch(finished);
-    await as(A).patch(`/api/matches/${x.pending}`).send({ time: '23:00' }).expect(409);
-    await as(A).patch(`/api/matches/${x.pending}`).send({ status: 'POSTPONED' }).expect(409);
-    await as(A).patch(`/api/matches/${x.played}`).send({ round: 3 }).expect(409);
+    await as(A).patch(`/api/matches/${x.pending}`).send({ reason: 'Motivo de prueba', time: '23:00' }).expect(409);
+    await as(A).patch(`/api/matches/${x.pending}`).send({ reason: 'Motivo de prueba', status: 'POSTPONED' }).expect(409);
+    await as(A).patch(`/api/matches/${x.played}`).send({ reason: 'Motivo de prueba', round: 3 }).expect(409);
     await as(A).delete(`/api/matches/${x.pending}`).expect(409);
   });
 
@@ -496,7 +496,7 @@ describe('Torneo FINISHED = historial inmutable', () => {
   });
 
   it('otro organizador sigue recibiendo 403 (la propiedad se comprueba primero)', async () => {
-    await as(B).patch(`/api/matches/${x.pending}`).send({ time: '23:00' }).expect(403);
+    await as(B).patch(`/api/matches/${x.pending}`).send({ reason: 'Motivo de prueba', time: '23:00' }).expect(403);
     await as(B).post(`/api/tournaments/${x.id}/teams/${x.outsider}`).expect(403);
   });
 

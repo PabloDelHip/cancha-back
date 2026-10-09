@@ -208,14 +208,14 @@ describe('buildPlayerProfile — cobertura PARTIAL (6F)', () => {
     });
   };
 
-  it('FULL: campeón y goleador; PARTIAL: mismas estadísticas pero sin campeón, fase ni goleador del torneo', () => {
+  it('los campos antiguos no ocultan campeón ni goleador', () => {
     const full = run();
     const partial = run('PARTIAL');
     expect(full.honors.map((h) => h.type).sort()).toEqual(['CHAMPION', 'TOP_SCORER']);
-    expect(partial.honors).toEqual([]);
-    expect(partial.competitions[0].topScorer).toBeNull();
-    expect(partial.competitions[0].teams[0].outcome).toBeNull();
-    expect(partial.career).toEqual({ ...full.career, titles: 0 });
+    expect(partial.honors).toEqual(full.honors);
+    expect(partial.competitions[0].topScorer).toEqual(full.competitions[0].topScorer);
+    expect(partial.competitions[0].teams[0].outcome).toEqual(full.competitions[0].teams[0].outcome);
+    expect(partial.career).toEqual(full.career);
     expect(partial.career).toMatchObject({ appearances: 1, goals: 2, assists: 1 });
     expect(partial.recentMatches.map(({ id: _id, ...m }) => m)).toEqual(full.recentMatches.map(({ id: _id, ...m }) => m));
   });

@@ -106,4 +106,11 @@ export class GenerateScheduleDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   replaceExisting: boolean = false;
+
+  @ApiPropertyOptional({
+    description: 'Confirmación explícita para borrar partidos con cancha o árbitros asignados (se liberan esas asignaciones).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  releaseAssignments?: boolean;
 }
