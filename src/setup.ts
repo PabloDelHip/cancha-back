@@ -31,7 +31,7 @@ export function configureApp(
 
   if (options.swagger) {
     const config = new DocumentBuilder()
-      .setTitle('Cancha API')
+      .setTitle('Kisokar API')
       .setDescription(
         'Torneo → Partido → Estadísticas → Perfil del jugador.\n\n' +
           'Lectura pública; escritura con JWT (Authorize → access token de /auth/login) y ' +

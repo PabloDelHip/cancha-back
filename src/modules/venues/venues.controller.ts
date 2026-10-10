@@ -6,6 +6,20 @@ import type { AuthUser } from '../auth/auth.types.js';
 import { VenuesService } from './venues.service.js';
 import { CheckSlotQueryDto, CreateFieldDto, CreateVenueDto, UpdateFieldDto, UpdateVenueDto } from './dto/venue.dto.js';
 
+/** Sedes del propietario de un torneo, para sus colaboradores con permiso de asignar (RBAC R3). */
+@ApiTags('venues')
+@ApiBearerAuth()
+@Controller('tournaments/:id/venues')
+export class TournamentVenuesController {
+  constructor(private readonly service: VenuesService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Sedes y canchas del propietario del torneo (solo lectura; quien asigna canchas en él)' })
+  list(@Param('id', IsObjectIdPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.service.forTournament(id, user);
+  }
+}
+
 /** Sedes y canchas del organizador (reutilizables en todas sus ligas y torneos). */
 @ApiTags('venues')
 @ApiBearerAuth()

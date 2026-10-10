@@ -66,7 +66,20 @@ export class VenuesService {
 
   /** Sedes del organizador (sin las eliminadas) con el uso de cada cancha. */
   async list(user: AuthUser) {
-    const venues = await this.venues.find({ organizerId: toObjectId(user.id), archived: false }).sort({ name: 1 }).lean();
+    return this.listOf(toObjectId(user.id));
+  }
+
+  /**
+   * Catálogo del PROPIETARIO del torneo, para quien asigna canchas en él (RBAC R3). El propietario
+   * sale siempre del torneo (nunca del cliente); el colaborador solo lo lee, no lo administra.
+   */
+  async forTournament(tournamentId: string, user: AuthUser) {
+    const { tournament } = await this.tournamentAccess.require(tournamentId, user.id, Permission.ASSIGNMENTS);
+    return this.listOf(tournament.organizerId);
+  }
+
+  private async listOf(organizerId: Types.ObjectId) {
+    const venues = await this.venues.find({ organizerId, archived: false }).sort({ name: 1 }).lean();
     const fieldIds = venues.flatMap((v) => v.fields.map((f) => f._id));
     const usage = await this.matches.aggregate<{ _id: Types.ObjectId; total: number; pending: number }>([
       { $match: { fieldId: { $in: fieldIds } } },

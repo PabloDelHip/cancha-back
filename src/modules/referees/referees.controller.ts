@@ -19,6 +19,12 @@ export class RefereesController {
     return this.service.list(user);
   }
 
+  @Get('tournaments/:id/referees')
+  @ApiOperation({ summary: 'Árbitros del propietario con contacto (ADMIN/COORDINATOR del torneo)' })
+  forTournament(@Param('id', IsObjectIdPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.service.forTournament(id, user);
+  }
+
   @Post('referees')
   @ApiOperation({ summary: 'Registrar un árbitro' })
   create(@Body() dto: CreateRefereeDto, @CurrentUser() user: AuthUser) {

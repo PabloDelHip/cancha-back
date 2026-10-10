@@ -5,7 +5,7 @@ import { ageOn } from './dates.js';
  * Representaciones PÚBLICAS (sin sesión) de las entidades que se embeben en otras respuestas.
  * Listas blancas explícitas: un campo nuevo en el schema no se publica hasta añadirlo aquí.
  *
- * Política V1 de datos personales (Cancha puede tener menores): lo público se minimiza.
+ * Política V1 de datos personales (Kisokar puede tener menores): lo público se minimiza.
  * De la fecha de nacimiento solo sale la edad derivada; nunca contacto, cuenta ni custodio.
  * La fecha exacta solo la recibe el custodio de la ficha (`/admin/players`, create/update).
  */

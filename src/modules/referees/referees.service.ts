@@ -14,6 +14,7 @@ import { sameId, serialize, toObjectId } from '../../common/utils/serialize.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { addDays, availabilityWarnings, clockOf, conflictsAmong, DEFAULT_BUFFER_MINUTES, durationOf, interval, overlaps, RESERVING, reserves, type Slot } from '../venues/occupancy.js';
 import { MatchLogService } from '../match-log/match-log.service.js';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import type { AssignRefereeDto, CreateRefereeDto, RefereeAbsenceDto, UpdateRefereeDto } from './dto/referee.dto.js';
 
 /** Partidos por jugar: impiden desactivar o eliminar al árbitro asignado. */
@@ -52,6 +53,7 @@ export class RefereesService {
     @InjectConnection() private readonly connection: Connection,
     private readonly ownership: OwnershipService,
     private readonly log: MatchLogService,
+    private readonly access: TournamentAccessService,
   ) {}
 
   // ─── CRUD ───────────────────────────────────────────────────────────────────
@@ -66,6 +68,16 @@ export class RefereesService {
     ]);
     const byId = new Map(usage.map((u) => [u._id.toHexString(), u]));
     return list.map((r) => view(r, byId.get(r._id.toHexString())));
+  }
+
+  /**
+   * Árbitros del PROPIETARIO del torneo con su contacto, para ADMIN/COORDINATOR de ese torneo
+   * (Permission.REFEREE_CONTACT). El propietario sale del torneo; el catálogo no se modifica aquí.
+   */
+  async forTournament(tournamentId: string, user: AuthUser) {
+    const { tournament } = await this.access.require(tournamentId, user.id, Permission.REFEREE_CONTACT);
+    const list = await this.referees.find({ organizerId: tournament.organizerId, archived: false }).sort({ lastName: 1, firstName: 1 }).lean();
+    return list.map((r) => ({ id: r._id.toHexString(), name: refereeName(r), phone: r.phone, email: r.email, active: r.active }));
   }
 
   async create(dto: CreateRefereeDto, user: AuthUser) {

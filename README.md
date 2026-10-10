@@ -1,4 +1,4 @@
-# Cancha · Backend
+# Kisokar · Backend
 
 API REST del MVP: NestJS + Mongoose + MongoDB. Monolito modular con autenticación JWT y
 autorización por propiedad del torneo.

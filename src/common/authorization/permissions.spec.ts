@@ -21,4 +21,13 @@ describe('matriz de permisos (RBAC)', () => {
     expect(permissionsOf(TournamentRole.SCORER).sort()).toEqual([Permission.VIEW, Permission.RESULTS, Permission.DISCIPLINE_VIEW, Permission.LOGS_VIEW].sort());
     expect(can(TournamentRole.SCORER, Permission.REFEREE_CONTACT)).toBe(false);
   });
+
+  it('recursos del propietario (R3): asignar y ver contacto solo OWNER/ADMIN/COORDINATOR', () => {
+    for (const role of ['OWNER', TournamentRole.ADMIN, TournamentRole.COORDINATOR] as const) {
+      expect(can(role, Permission.ASSIGNMENTS)).toBe(true);
+      expect(can(role, Permission.REFEREE_CONTACT)).toBe(true);
+    }
+    expect(can(TournamentRole.SCORER, Permission.ASSIGNMENTS)).toBe(false);
+    expect(can(TournamentRole.SCORER, Permission.REFEREE_CONTACT)).toBe(false);
+  });
 });
