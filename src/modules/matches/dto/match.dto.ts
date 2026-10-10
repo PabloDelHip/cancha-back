@@ -86,9 +86,32 @@ export class CreateMatchDto {
   status?: MatchStatus;
 }
 
+/** Lo que el organizador confirmó liberar en la vista previa de una reprogramación (2C-2). */
+export class ReleaseDto {
+  @ApiProperty({ description: 'Liberar la cancha (choca en el nuevo horario)' })
+  @IsBoolean()
+  field: boolean;
+
+  @ApiProperty({ type: [String], description: 'Asignaciones arbitrales a liberar (las que chocan)' })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsMongoId({ each: true })
+  assignmentIds: string[];
+}
+
 export class UpdateMatchDto extends PartialType(
   OmitType(CreateMatchDto, ['status'] as const),
 ) {
+  @ApiPropertyOptional({
+    type: ReleaseDto,
+    description:
+      'Confirmación de una vista previa de reprogramación: se libera exactamente esto. Si ya no coincide con lo que choca → 409 RESCHEDULE_STALE con la vista previa nueva. Sin este campo, un choque responde 409 como siempre.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ReleaseDto)
+  release?: ReleaseDto;
+
   @ApiPropertyOptional({
     nullable: true,
     maxLength: 300,
@@ -104,6 +127,26 @@ export class UpdateMatchDto extends PartialType(
     enum: MatchStatus,
     description: 'FINISHED solo si el partido ya tiene marcador',
   })
+  @IsOptional()
+  @IsEnum(MatchStatus)
+  status?: MatchStatus;
+}
+
+export class ReschedulePreviewDto {
+  @ApiProperty({ example: '2027-01-16' })
+  @IsISODateOnly()
+  date: string;
+
+  @ApiProperty({ example: '19:30' })
+  @IsTime()
+  time: string;
+
+  @ApiPropertyOptional({ nullable: true, type: String, description: 'Cancha en el nuevo horario. Omitido = la actual; null = sin cancha.' })
+  @IsOptional()
+  @IsMongoId()
+  fieldId?: string | null;
+
+  @ApiPropertyOptional({ enum: MatchStatus, description: 'Estado con el que quedará (por defecto, el actual)' })
   @IsOptional()
   @IsEnum(MatchStatus)
   status?: MatchStatus;

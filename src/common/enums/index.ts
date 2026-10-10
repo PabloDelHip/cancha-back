@@ -67,6 +67,12 @@ export enum MatchStatus {
   FINISHED = 'FINISHED',
   POSTPONED = 'POSTPONED',
   CANCELLED = 'CANCELLED',
+  /**
+   * Suspendido (Módulo 2C-2): no pudo continuar y queda pendiente de decisión (reanudar,
+   * reprogramar, posponer, cancelar o dar por terminado con resultado). Solo se llega registrando
+   * una incidencia de suspensión.
+   */
+  SUSPENDED = 'SUSPENDED',
 }
 
 /**
@@ -187,6 +193,10 @@ export enum RefereeRole {
 export enum RefereeAssignmentStatus {
   ASSIGNED = 'ASSIGNED',
   ABSENT = 'ABSENT',
+  /** Anulada (2C-2): se registró por error. Se conserva con quién, cuándo y por qué. */
+  VOID = 'VOID',
+  /** Liberada al reprogramar el partido (chocaba en el nuevo horario). Se conserva. */
+  RELEASED = 'RELEASED',
 }
 
 /** Historial de partidos (Módulo 2C). Solo se agregan entradas. */
@@ -202,6 +212,22 @@ export enum MatchLogAction {
   REFEREE_ASSIGNED = 'REFEREE_ASSIGNED',
   REFEREE_REMOVED = 'REFEREE_REMOVED',
   REFEREE_ABSENT = 'REFEREE_ABSENT',
+  /** Corrección justificada de una ausencia o sustitución (anulación VOID). */
+  REFEREE_CORRECTED = 'REFEREE_CORRECTED',
+  /** Incidencias (2C-2). Una de suspensión además cambia el estado del partido. */
+  INCIDENT_REPORTED = 'INCIDENT_REPORTED',
+  INCIDENT_RESOLVED = 'INCIDENT_RESOLVED',
+  INCIDENT_VOIDED = 'INCIDENT_VOIDED',
+  /** Decisión sobre un partido suspendido. */
+  SUSPENSION_RESOLVED = 'SUSPENSION_RESOLVED',
+  /** Ficha técnica (2D): alineación y sustituciones de un equipo, observaciones, cierre y reapertura. */
+  SHEET_LINEUP_SAVED = 'SHEET_LINEUP_SAVED',
+  SHEET_OBSERVATIONS_SAVED = 'SHEET_OBSERVATIONS_SAVED',
+  SHEET_CLOSED = 'SHEET_CLOSED',
+  SHEET_REOPENED = 'SHEET_REOPENED',
+  /** Fotografías de evidencia (2D). */
+  EVIDENCE_ADDED = 'EVIDENCE_ADDED',
+  EVIDENCE_REMOVED = 'EVIDENCE_REMOVED',
   /** Un partido eliminado (copia y recursos liberados). */
   DELETED = 'DELETED',
   /** Calendario reemplazado: una entrada con todos los partidos eliminados. */
@@ -247,4 +273,44 @@ export enum InvitationStatus {
   ACCEPTED = 'ACCEPTED',
   DECLINED = 'DECLINED',
   REVOKED = 'REVOKED',
+}
+
+/** Incidencias de un partido (Módulo 2C-2). SUSPENSION impide continuar; el resto es informativa. */
+export enum MatchIncidentType {
+  DELAY = 'DELAY',
+  SUSPENSION = 'SUSPENSION',
+  FACILITIES = 'FACILITIES',
+  SECURITY = 'SECURITY',
+  OTHER = 'OTHER',
+}
+
+/** OPEN → RESOLVED (con nota o decisión) o VOID (registrada por error). Nunca se borran. */
+export enum MatchIncidentStatus {
+  OPEN = 'OPEN',
+  RESOLVED = 'RESOLVED',
+  VOID = 'VOID',
+}
+
+/** Qué se decidió sobre un partido suspendido. */
+export enum SuspensionDecision {
+  RESUMED = 'RESUMED',
+  RESCHEDULED = 'RESCHEDULED',
+  POSTPONED = 'POSTPONED',
+  CANCELLED = 'CANCELLED',
+  FINISHED = 'FINISHED',
+}
+
+/** Tipo de fotografía de evidencia de un partido (2D). */
+export enum EvidenceKind {
+  REFEREE_REPORT = 'REFEREE_REPORT',
+  LINEUP = 'LINEUP',
+  INCIDENT = 'INCIDENT',
+  SCOREBOARD = 'SCOREBOARD',
+  OTHER = 'OTHER',
+}
+
+/** ACTIVE → REMOVED (retirada con motivo; el registro se conserva). */
+export enum EvidenceStatus {
+  ACTIVE = 'ACTIVE',
+  REMOVED = 'REMOVED',
 }

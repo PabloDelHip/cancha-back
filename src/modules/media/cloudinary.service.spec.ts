@@ -85,4 +85,44 @@ describe('detectImageType (contenido real, no el mimetype del cliente)', () => {
     expect(detectImageType(pad(Buffer.from('MZ\x90\x00')))).toBeNull();
     expect(detectImageType(Buffer.from([0xff, 0xd8]))).toBeNull();
   });
+
+  it('privado (2D): sube con type=private, public_id determinista y overwrite; la URL es temporal y firmada', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ public_id: 'kikovo/evidence/t/m/key12345', version: 1, format: 'jpg', bytes: 1234 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const svc = configured();
+    expect(await svc.uploadPrivate(file, { publicId: 'kikovo/evidence/t/m/key12345', incoming: 'c_limit,w_2400,h_2400' })).toEqual({ publicId: 'kikovo/evidence/t/m/key12345', version: 1, format: 'jpg', bytes: 1234 });
+    const form = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as FormData;
+    expect([form.get('type'), form.get('overwrite'), form.get('public_id')]).toEqual(['private', 'true', 'kikovo/evidence/t/m/key12345']);
+    expect(form.get('signature')).toBe(
+      CloudinaryService.sign({ overwrite: 'true', public_id: 'kikovo/evidence/t/m/key12345', timestamp: Number(form.get('timestamp')), transformation: 'c_limit,w_2400,h_2400', type: 'private' }, 'shh-secret'),
+    );
+
+    const before = Math.floor(Date.now() / 1000);
+    const { url, expiresAt } = svc.privateUrl('kikovo/evidence/t/m/key12345', 'jpg', 300);
+    const u = new URL(url);
+    expect(u.origin + u.pathname).toBe('https://api.cloudinary.com/v1_1/demo-cloud/image/download');
+    const q = Object.fromEntries(u.searchParams);
+    expect(Number(q.expires_at)).toBeGreaterThanOrEqual(before + 300);
+    expect(expiresAt.getTime()).toBe(Number(q.expires_at) * 1000);
+    expect(q.type).toBe('private');
+    expect(url).not.toContain('shh-secret');
+    const { signature, api_key: _k, ...signed } = q;
+    expect(signature).toBe(CloudinaryService.sign(signed, 'shh-secret'));
+    // Nunca una URL pública permanente de res.cloudinary.com.
+    expect(url).not.toContain('res.cloudinary.com');
+  });
+
+  it('privado: listar con Admin API (Basic) y borrar con type=private; la base del API es configurable (pruebas)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ resources: [{ public_id: 'kikovo/evidence/a', created_at: '2026-01-01T00:00:00Z' }], next_cursor: 'c2' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const svc = new CloudinaryService(config({ CLOUDINARY_CLOUD_NAME: 'demo-cloud', CLOUDINARY_API_KEY: '123456', CLOUDINARY_API_SECRET: 'shh-secret', CLOUDINARY_API_URL: 'http://localhost:3999' }));
+    const page = await svc.listPrivate('kikovo/evidence/');
+    expect(page).toEqual({ resources: [{ publicId: 'kikovo/evidence/a', createdAt: new Date('2026-01-01T00:00:00Z') }], nextCursor: 'c2' });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://localhost:3999/v1_1/demo-cloud/resources/image/private?prefix=kikovo%2Fevidence%2F&max_results=500');
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Basic ${Buffer.from('123456:shh-secret').toString('base64')}`);
+    fetchMock.mockImplementation(async () => new Response('{}', { status: 200 }));
+    expect(await svc.destroyPrivate('kikovo/evidence/a')).toBe(true);
+    expect((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body instanceof FormData && ((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body as FormData).get('type')).toBe('private');
+  });
 });

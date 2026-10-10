@@ -4,7 +4,7 @@ import { ApiBearerAuth, ApiConflictResponse, ApiOperation, ApiTags } from '@nest
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { RefereesService } from './referees.service.js';
-import { AssignRefereeDto, CreateRefereeDto, RefereeAbsenceDto, UpdateRefereeDto } from './dto/referee.dto.js';
+import { AssignRefereeDto, CreateRefereeDto, RefereeAbsenceDto, RefereeCorrectionDto, UpdateRefereeDto } from './dto/referee.dto.js';
 
 /** Árbitros del organizador y sus asignaciones a partidos (Módulo 2B). */
 @ApiTags('referees')
@@ -85,5 +85,18 @@ export class RefereesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.absence(id, assignmentId, dto, user);
+  }
+
+  @Post('matches/:id/referees/:assignmentId/correct')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Corregir con motivo una ausencia o una sustitución mal registradas (anulación VOID, nada se borra)' })
+  @ApiConflictResponse({ description: 'Ya anulada, sin nada que corregir, rol ocupado o REFEREE_CONFLICT al restituir' })
+  correct(
+    @Param('id', IsObjectIdPipe) id: string,
+    @Param('assignmentId', IsObjectIdPipe) assignmentId: string,
+    @Body() dto: RefereeCorrectionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.correct(id, assignmentId, dto, user);
   }
 }

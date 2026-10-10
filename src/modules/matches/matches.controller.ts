@@ -25,6 +25,7 @@ import { MatchesService } from './matches.service.js';
 import {
   CreateMatchDto,
   MatchQueryDto,
+  ReschedulePreviewDto,
   SaveResultDto,
   UpdateMatchDto,
 } from './dto/match.dto.js';
@@ -79,6 +80,21 @@ export class MatchesController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.update(id, dto, user);
+  }
+
+  @Post('matches/:id/reschedule-preview')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Vista previa de una reprogramación: qué cancha y árbitros se conservan y cuáles habría que liberar',
+    description: 'No escribe nada. Para aplicar, PATCH /matches/:id con `release` igual a `release` de esta respuesta.',
+  })
+  reschedulePreview(
+    @Param('id', IsObjectIdPipe) id: string,
+    @Body() dto: ReschedulePreviewDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.reschedulePreview(id, dto, user);
   }
 
   @Delete('matches/:id')

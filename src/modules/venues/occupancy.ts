@@ -14,8 +14,11 @@ export const DEFAULT_BUFFER_MINUTES = 15;
 export const durationOf = (t: { information?: { schedule?: { durationMinutes?: number | null } } } | null | undefined) =>
   t?.information?.schedule?.durationMinutes ?? DEFAULT_MATCH_MINUTES;
 
-/** Cancelados y pospuestos no reservan: un pospuesto vuelve a reservar al reprogramarse. */
-export const RESERVING = [MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.FINISHED];
+/**
+ * Cancelados y pospuestos no reservan: un pospuesto vuelve a reservar al reprogramarse. Un
+ * suspendido conserva su horario (ya lo ocupó) hasta que se decida qué pasa con él.
+ */
+export const RESERVING = [MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.FINISHED, MatchStatus.SUSPENDED];
 export const reserves = (status: MatchStatus) => RESERVING.includes(status);
 
 /** Minutos absolutos de una fecha y hora locales (`YYYY-MM-DD`, `HH:mm`). */

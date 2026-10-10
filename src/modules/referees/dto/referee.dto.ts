@@ -72,3 +72,22 @@ export class RefereeAbsenceDto {
   @MaxLength(300)
   note?: string | null;
 }
+
+/**
+ * Corrección justificada (2C-2). Sobre una AUSENCIA: sin `substituteId` la anula (sí se presentó) y
+ * anula a su sustituto; con `substituteId` cambia el sustituto. Sobre un SUSTITUTO: lo anula y, si
+ * se indica, registra al correcto. Nada se borra: lo corregido queda VOID con el motivo.
+ */
+export class RefereeCorrectionDto {
+  @ApiProperty({ minLength: 3, maxLength: 300, description: 'Motivo de la corrección (obligatorio, queda en el historial)' })
+  @Trim()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(300)
+  reason: string;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Sustituto correcto (mismo rol)' })
+  @IsOptional()
+  @IsMongoId()
+  substituteId?: string | null;
+}

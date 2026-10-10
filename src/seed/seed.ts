@@ -130,6 +130,10 @@ async function run() {
       venues: model(Models.venue),
       referees: model(Models.referee),
       matchLogs: model(Models.matchLog),
+      matchIncidents: model(Models.matchIncident),
+      matchSheets: model(Models.matchSheet),
+      // Solo registros: el seed no borra archivos de Cloudinary (los recoge evidence:cleanup).
+      matchEvidence: model(Models.matchEvidence),
       tournamentMembers: model(Models.tournamentMember),
       tournamentInvitations: model(Models.tournamentInvitation),
     };

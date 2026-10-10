@@ -16,9 +16,9 @@ describe('matriz de permisos (RBAC)', () => {
 
   it('COORDINATOR y SCORER: exactamente lo aprobado', () => {
     expect(permissionsOf(TournamentRole.COORDINATOR).sort()).toEqual(
-      [Permission.VIEW, Permission.SCHEDULE, Permission.ASSIGNMENTS, Permission.DISCIPLINE_VIEW, Permission.LOGS_VIEW, Permission.REFEREE_CONTACT].sort(),
+      [Permission.VIEW, Permission.SCHEDULE, Permission.ASSIGNMENTS, Permission.INCIDENTS, Permission.REFEREE_CORRECTIONS, Permission.EVIDENCE_UPLOAD, Permission.DISCIPLINE_VIEW, Permission.LOGS_VIEW, Permission.REFEREE_CONTACT].sort(),
     );
-    expect(permissionsOf(TournamentRole.SCORER).sort()).toEqual([Permission.VIEW, Permission.RESULTS, Permission.DISCIPLINE_VIEW, Permission.LOGS_VIEW].sort());
+    expect(permissionsOf(TournamentRole.SCORER).sort()).toEqual([Permission.VIEW, Permission.RESULTS, Permission.EVIDENCE_UPLOAD, Permission.DISCIPLINE_VIEW, Permission.LOGS_VIEW].sort());
     expect(can(TournamentRole.SCORER, Permission.REFEREE_CONTACT)).toBe(false);
   });
 
@@ -29,5 +29,23 @@ describe('matriz de permisos (RBAC)', () => {
     }
     expect(can(TournamentRole.SCORER, Permission.ASSIGNMENTS)).toBe(false);
     expect(can(TournamentRole.SCORER, Permission.REFEREE_CONTACT)).toBe(false);
+  });
+
+  it('2C-2: incidencias y correcciones arbitrales solo OWNER/ADMIN/COORDINATOR; SCORER no', () => {
+    for (const role of ['OWNER', TournamentRole.ADMIN, TournamentRole.COORDINATOR] as const) {
+      expect(can(role, Permission.INCIDENTS)).toBe(true);
+      expect(can(role, Permission.REFEREE_CORRECTIONS)).toBe(true);
+    }
+    expect(can(TournamentRole.SCORER, Permission.INCIDENTS)).toBe(false);
+    expect(can(TournamentRole.SCORER, Permission.REFEREE_CORRECTIONS)).toBe(false);
+  });
+
+  it('2D: cerrar y reabrir la ficha y retirar fotos solo OWNER/ADMIN; subir fotos todos; alineaciones con RESULTS', () => {
+    for (const p of [Permission.SHEET_CLOSE, Permission.SHEET_REOPEN, Permission.EVIDENCE_REMOVE]) {
+      expect(['OWNER', TournamentRole.ADMIN].every((r) => can(r as 'OWNER', p))).toBe(true);
+      expect(can(TournamentRole.COORDINATOR, p) || can(TournamentRole.SCORER, p)).toBe(false);
+    }
+    for (const r of ['OWNER', TournamentRole.ADMIN, TournamentRole.COORDINATOR, TournamentRole.SCORER] as const) expect(can(r, Permission.EVIDENCE_UPLOAD)).toBe(true);
+    expect(can(TournamentRole.COORDINATOR, Permission.RESULTS)).toBe(false);
   });
 });

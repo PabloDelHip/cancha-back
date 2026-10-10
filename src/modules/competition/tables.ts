@@ -21,7 +21,7 @@ export interface StagedMatch extends MatchLike {
   extraTime?: boolean;
 }
 
-const OPEN = new Set<string>([MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.POSTPONED]);
+const OPEN = new Set<string>([MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.POSTPONED, MatchStatus.SUSPENDED]);
 
 /** Partidos de una fase (sin stage = fase 0: liga clásica de V1). */
 export const phaseMatches = <T extends { stage: MatchStage | null }>(matches: T[], phase: number) =>

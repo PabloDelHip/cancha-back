@@ -38,11 +38,14 @@ export class CloudinaryService {
   private readonly cloudName: string | null;
   private readonly apiKey: string | null;
   private readonly apiSecret: string | null;
+  /** Base del API (la real; en pruebas puede apuntar a un almacenamiento simulado). */
+  private readonly apiUrl: string;
 
   constructor(config: ConfigService<EnvConfig, true>) {
     this.cloudName = config.get('CLOUDINARY_CLOUD_NAME', { infer: true });
     this.apiKey = config.get('CLOUDINARY_API_KEY', { infer: true });
     this.apiSecret = config.get('CLOUDINARY_API_SECRET', { infer: true });
+    this.apiUrl = config.get('CLOUDINARY_API_URL', { infer: true }) ?? 'https://api.cloudinary.com';
   }
 
   get configured() {
@@ -61,16 +64,70 @@ export class CloudinaryService {
   }
 
   /**
+   * Subida PRIVADA (`type=private`, evidencias de partidos): nunca hay URL pública; se entrega solo
+   * con una URL firmada y con vencimiento (`privateUrl`). `public_id` determinista + `overwrite`:
+   * reintentar la misma subida reemplaza el mismo archivo en vez de dejar copias.
+   */
+  async uploadPrivate(file: UploadedImage, opts: { publicId: string; incoming: string }): Promise<{ publicId: string; version: number; format: string; bytes: number }> {
+    const form = this.signedForm({ overwrite: 'true', public_id: opts.publicId, timestamp: now(), transformation: opts.incoming, type: 'private' });
+    form.append('file', new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }), 'upload');
+    const res = await this.post('upload', form);
+    if (!res.ok) throw await this.failure('subir la imagen', res);
+    const body = (await res.json()) as { public_id: string; version: number; format: string; bytes: number };
+    return { publicId: body.public_id, version: body.version, format: body.format, bytes: body.bytes };
+  }
+
+  /**
+   * URL temporal de un archivo privado (API de descarga firmada con `expires_at`). Se genera sin
+   * red, después de comprobar permisos; caduca sola y no sirve para otro archivo.
+   */
+  privateUrl(publicId: string, format: string, ttlSeconds: number) {
+    this.assertConfigured();
+    const expiresAt = now() + ttlSeconds;
+    const params = { attachment: 'false', expires_at: expiresAt, format, public_id: publicId, timestamp: now(), type: 'private' };
+    const query = new URLSearchParams({ ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])), api_key: this.apiKey!, signature: CloudinaryService.sign(params, this.apiSecret!) });
+    return { url: `${this.apiUrl}/v1_1/${this.cloudName}/image/download?${query}`, expiresAt: new Date(expiresAt * 1000) };
+  }
+
+  /** Una página de archivos privados bajo un prefijo (Admin API), para limpiar huérfanos. */
+  async listPrivate(prefix: string, cursor?: string): Promise<{ resources: { publicId: string; createdAt: Date }[]; nextCursor: string | null }> {
+    this.assertConfigured();
+    const query = new URLSearchParams({ prefix, max_results: '500', ...(cursor ? { next_cursor: cursor } : {}) });
+    let res: Response;
+    try {
+      res = await fetch(`${this.apiUrl}/v1_1/${this.cloudName}/resources/image/private?${query}`, {
+        headers: { Authorization: `Basic ${Buffer.from(`${this.apiKey}:${this.apiSecret}`).toString('base64')}` },
+      });
+    } catch (e) {
+      throw new BadGatewayException(`El servicio de imágenes no está disponible: ${(e as Error).message}`);
+    }
+    if (!res.ok) throw await this.failure('listar las imágenes', res);
+    const body = (await res.json()) as { resources: { public_id: string; created_at: string }[]; next_cursor?: string };
+    return { resources: body.resources.map((r) => ({ publicId: r.public_id, createdAt: new Date(r.created_at) })), nextCursor: body.next_cursor ?? null };
+  }
+
+  /**
    * Borra una imagen (y la invalida en la CDN). Nunca lanza: una imagen huérfana es preferible a
    * fallar una operación que ya se guardó; el fallo queda en el log.
    */
   async destroy(publicId: string | null | undefined): Promise<void> {
-    if (!publicId || !this.configured) return;
+    await this.remove(publicId, 'upload');
+  }
+
+  /** Borra un archivo privado (evidencia). Nunca lanza; devuelve si se borró. */
+  destroyPrivate(publicId: string): Promise<boolean> {
+    return this.remove(publicId, 'private');
+  }
+
+  private async remove(publicId: string | null | undefined, type: 'upload' | 'private'): Promise<boolean> {
+    if (!publicId || !this.configured) return false;
     try {
-      const res = await this.post('destroy', this.signedForm({ invalidate: 'true', public_id: publicId, timestamp: now() }));
+      const res = await this.post('destroy', this.signedForm({ invalidate: 'true', public_id: publicId, timestamp: now(), ...(type === 'private' ? { type } : {}) }));
       if (!res.ok) this.logger.warn(`No se pudo borrar ${publicId} de Cloudinary (HTTP ${res.status})`);
+      return res.ok;
     } catch (e) {
       this.logger.warn(`No se pudo borrar ${publicId} de Cloudinary: ${(e as Error).message}`);
+      return false;
     }
   }
 
@@ -99,7 +156,7 @@ export class CloudinaryService {
 
   private async post(action: 'upload' | 'destroy', form: FormData) {
     try {
-      return await fetch(`https://api.cloudinary.com/v1_1/${this.cloudName}/image/${action}`, { method: 'POST', body: form });
+      return await fetch(`${this.apiUrl}/v1_1/${this.cloudName}/image/${action}`, { method: 'POST', body: form });
     } catch (e) {
       this.logger.error(`Cloudinary no responde (${action}): ${(e as Error).message}`);
       throw new BadGatewayException('El servicio de imágenes no está disponible. Inténtalo de nuevo.');

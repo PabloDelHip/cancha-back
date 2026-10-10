@@ -32,6 +32,9 @@ import { RegistrationDraft, RegistrationDraftSchema } from '../modules/registrat
 import { TournamentInvitation, TournamentInvitationSchema } from '../modules/tournaments/schemas/tournament-invitation.schema.js';
 import { TournamentMember, TournamentMemberSchema } from '../modules/tournaments/schemas/tournament-member.schema.js';
 import { MatchLog, MatchLogSchema } from '../modules/match-log/schemas/match-log.schema.js';
+import { MatchIncident, MatchIncidentSchema } from '../modules/match-incidents/schemas/match-incident.schema.js';
+import { MatchSheet, MatchSheetSchema } from '../modules/match-sheet/schemas/match-sheet.schema.js';
+import { MatchEvidence, MatchEvidenceSchema } from '../modules/match-sheet/schemas/match-evidence.schema.js';
 import { Referee, RefereeSchema } from '../modules/referees/schemas/referee.schema.js';
 import { Venue, VenueSchema } from '../modules/venues/schemas/venue.schema.js';
 import { Sanction, SanctionSchema } from '../modules/discipline/schemas/sanction.schema.js';
@@ -71,6 +74,9 @@ export const Models = {
   venue: { name: Venue.name, schema: VenueSchema },
   referee: { name: Referee.name, schema: RefereeSchema },
   matchLog: { name: MatchLog.name, schema: MatchLogSchema },
+  matchIncident: { name: MatchIncident.name, schema: MatchIncidentSchema },
+  matchSheet: { name: MatchSheet.name, schema: MatchSheetSchema },
+  matchEvidence: { name: MatchEvidence.name, schema: MatchEvidenceSchema },
   tournamentMember: { name: TournamentMember.name, schema: TournamentMemberSchema },
   tournamentInvitation: { name: TournamentInvitation.name, schema: TournamentInvitationSchema },
 } satisfies Record<string, ModelDefinition>;

@@ -36,7 +36,7 @@ const TOP_SCORERS = 10;
 const TOP_ASSISTS = 10;
 const FORM_LENGTH = 5;
 const POSITION_ORDER = [PlayerPosition.GOALKEEPER, PlayerPosition.DEFENDER, PlayerPosition.MIDFIELDER, PlayerPosition.FORWARD];
-const OPEN = new Set<string>([MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.POSTPONED]);
+const OPEN = new Set<string>([MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.POSTPONED, MatchStatus.SUSPENDED]);
 
 export type TPMatch = StagedMatch;
 

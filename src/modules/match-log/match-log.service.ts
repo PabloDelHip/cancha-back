@@ -53,10 +53,25 @@ export class MatchLogService {
   }
 
   /** Edición de programación (fecha, hora, estado, cancha, jornada, equipos, torneo). */
-  async edited(session: ClientSession, actor: Actor, before: Doc, after: Doc, reason: string | null) {
-    const changes = diff(rec(before), rec(after), TRACKED);
-    if (!changes) return;
-    await this.write(session, actor, { tournamentId: after.tournamentId, matchId: after._id, action: editAction(changes), changes, reason });
+  async edited(
+    session: ClientSession,
+    actor: Actor,
+    before: Doc,
+    after: Doc,
+    reason: string | null,
+    opts: { action?: MatchLogAction; extra?: Record<string, { from: unknown; to: unknown }>; released?: MatchLog['released'] } = {},
+  ) {
+    const tracked = diff(rec(before), rec(after), TRACKED);
+    if (!tracked && !opts.extra) return;
+    const changes = { ...tracked, ...opts.extra };
+    await this.write(session, actor, {
+      tournamentId: after.tournamentId,
+      matchId: after._id,
+      action: opts.action ?? editAction(changes),
+      changes,
+      reason,
+      ...(opts.released?.length ? { released: opts.released } : {}),
+    });
   }
 
   /** Marcador y estado (no las estadísticas individuales). */
@@ -73,6 +88,11 @@ export class MatchLogService {
 
   /** Movimientos de árbitros (asignar, quitar, ausencia con o sin sustituto). */
   async referee(session: ClientSession, actor: Actor, match: Doc, action: MatchLogAction, changes: Record<string, { from: unknown; to: unknown }>, reason: string | null = null) {
+    await this.entry(session, actor, match, action, changes, reason);
+  }
+
+  /** Entrada con cambios explícitos (árbitros, incidencias). */
+  async entry(session: ClientSession, actor: Actor, match: Doc, action: MatchLogAction, changes: Record<string, { from: unknown; to: unknown }>, reason: string | null = null) {
     await this.write(session, actor, { tournamentId: match.tournamentId, matchId: match._id, action, changes, reason });
   }
 
@@ -152,7 +172,7 @@ export class MatchLogService {
     const refereeIds = new Set<string>();
     const scan = (v: unknown, key = '') => {
       if (typeof v === 'string' && /^[0-9a-f]{24}$/.test(v)) {
-        if (key === 'homeTeamId' || key === 'awayTeamId') teamIds.add(v);
+        if (key === 'homeTeamId' || key === 'awayTeamId' || key === 'teamId') teamIds.add(v);
         if (key === 'refereeId' || key === 'substituteId') refereeIds.add(v);
       } else if (Array.isArray(v)) v.forEach((x) => scan(x, key));
       else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) scan(x, k === 'from' || k === 'to' ? key : k);

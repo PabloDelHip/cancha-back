@@ -29,6 +29,18 @@ export enum Permission {
   DISCIPLINE_VIEW = 'DISCIPLINE_VIEW',
   /** Historial de partidos. */
   LOGS_VIEW = 'LOGS_VIEW',
+  /** Registrar, resolver y anular incidencias; suspender y reanudar partidos (2C-2). */
+  INCIDENTS = 'INCIDENTS',
+  /** Corregir (anular, VOID) ausencias y sustituciones arbitrales con motivo (2C-2). */
+  REFEREE_CORRECTIONS = 'REFEREE_CORRECTIONS',
+  /** Cerrar la ficha técnica de un partido (2D): congela la información deportiva. */
+  SHEET_CLOSE = 'SHEET_CLOSE',
+  /** Reabrir una ficha cerrada, con motivo (2D). */
+  SHEET_REOPEN = 'SHEET_REOPEN',
+  /** Subir fotografías de evidencia (2D). */
+  EVIDENCE_UPLOAD = 'EVIDENCE_UPLOAD',
+  /** Retirar una fotografía de evidencia, con motivo (2D). */
+  EVIDENCE_REMOVE = 'EVIDENCE_REMOVE',
   /** Teléfono y correo de los árbitros del propietario (dentro del torneo). */
   REFEREE_CONTACT = 'REFEREE_CONTACT',
 }
@@ -44,11 +56,14 @@ export const ROLE_PERMISSIONS: Record<AccessRole, ReadonlySet<Permission>> = {
     Permission.VIEW,
     Permission.SCHEDULE,
     Permission.ASSIGNMENTS,
+    Permission.INCIDENTS,
+    Permission.REFEREE_CORRECTIONS,
+    Permission.EVIDENCE_UPLOAD,
     Permission.DISCIPLINE_VIEW,
     Permission.LOGS_VIEW,
     Permission.REFEREE_CONTACT,
   ]),
-  [TournamentRole.SCORER]: new Set([Permission.VIEW, Permission.RESULTS, Permission.DISCIPLINE_VIEW, Permission.LOGS_VIEW]),
+  [TournamentRole.SCORER]: new Set([Permission.VIEW, Permission.RESULTS, Permission.EVIDENCE_UPLOAD, Permission.DISCIPLINE_VIEW, Permission.LOGS_VIEW]),
 };
 
 export const can = (role: AccessRole | null, permission: Permission) => !!role && ROLE_PERMISSIONS[role].has(permission);

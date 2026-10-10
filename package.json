@@ -22,7 +22,8 @@
     "seed": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/seed/seed.js",
     "test:unit": "vitest run",
     "team:assign-owner": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/assign-team-owner.js",
-    "leagues:migrate": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/migrate-leagues.js"
+    "leagues:migrate": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/migrate-leagues.js",
+    "evidence:cleanup": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/cleanup-evidence.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

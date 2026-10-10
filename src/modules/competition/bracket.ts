@@ -160,7 +160,7 @@ export interface ReconcileResult {
 }
 
 const hasResult = (m: StagedMatch) =>
-  m.status === MatchStatus.LIVE || m.status === MatchStatus.FINISHED || m.homeScore !== null || m.awayScore !== null;
+  m.status === MatchStatus.LIVE || m.status === MatchStatus.FINISHED || m.status === MatchStatus.SUSPENDED || m.homeScore !== null || m.awayScore !== null;
 const isFinished = (m: StagedMatch) => m.status === MatchStatus.FINISHED && m.homeScore !== null && m.awayScore !== null;
 
 export function seedMap(seeds: KnockoutSeed[] = []) {

@@ -14,14 +14,21 @@ import { Tournament } from '../tournaments/schemas/tournament.schema.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
 import { Player } from '../players/schemas/player.schema.js';
 import { TeamMembership } from '../players/schemas/team-membership.schema.js';
-import { MatchLogCause, MatchStatus, SendOff, TournamentStatus } from '../../common/enums/index.js';
+import { MatchLogAction, MatchLogCause, MatchStatus, SendOff, SuspensionDecision, TournamentStatus } from '../../common/enums/index.js';
 import { DisciplineService } from '../discipline/discipline.service.js';
 import { VenuesService } from '../venues/venues.service.js';
 import { RefereesService } from '../referees/referees.service.js';
 import { MatchLogService } from '../match-log/match-log.service.js';
+import { MatchIncidentsService } from '../match-incidents/match-incidents.service.js';
+import { reserves } from '../venues/occupancy.js';
+import { belongsOn } from '../players/membership-rules.js';
+import { MatchSheet } from '../match-sheet/schemas/match-sheet.schema.js';
+import { participationMismatch, participationOf } from '../match-sheet/lineup.js';
+import { assertSheetOpen, DECISION, publicMatch, sameRelease, type Released } from './match-rules.js';
 import {
   CreateMatchDto,
   MatchQueryDto,
+  ReschedulePreviewDto,
   SaveResultDto,
   UpdateMatchDto,
 } from './dto/match.dto.js';
@@ -47,6 +54,7 @@ export class MatchesService {
     @InjectModel(TeamMembership.name)
     private readonly memberships: Model<TeamMembership>,
     @InjectModel(Round.name) private readonly rounds: Model<Round>,
+    @InjectModel(MatchSheet.name) private readonly sheets: Model<MatchSheet>,
     private readonly ownership: OwnershipService,
     private readonly competition: CompetitionService,
     private readonly discipline: DisciplineService,
@@ -54,6 +62,7 @@ export class MatchesService {
     private readonly referees: RefereesService,
     private readonly log: MatchLogService,
     private readonly access: TournamentAccessService,
+    private readonly incidents: MatchIncidentsService,
   ) {}
 
   async findAll(query: MatchQueryDto) {
@@ -75,7 +84,7 @@ export class MatchesService {
         .lean(),
       this.matches.countDocuments(filter),
     ]);
-    return paginated(serialize(items), total, query);
+    return paginated(serialize(items.map(publicMatch)), total, query);
   }
 
   /** Todos los partidos de un torneo (acotado por naturaleza: no se pagina). */
@@ -86,12 +95,12 @@ export class MatchesService {
       .find({ tournamentId: toObjectId(tournamentId) })
       .sort({ round: 1, date: 1, time: 1 })
       .lean();
-    return serialize(items);
+    return serialize(items.map(publicMatch));
   }
 
   async findOne(id: string) {
     const match = await this.getOrFail(id);
-    return { ...serialize(match), playerStats: await this.listStats(id) };
+    return { ...serialize(publicMatch(match)), playerStats: await this.listStats(id) };
   }
 
   async listStats(matchId: string) {
@@ -167,6 +176,8 @@ export class MatchesService {
     let warnings: string[] = [];
     const saved = await this.ownership.inTournament(before.tournamentId, null, async (session, sourceStatus) => {
       const current = await this.reload(id, before.tournamentId, session);
+      // Ficha técnica cerrada (2D): nada del partido se edita hasta reabrirla.
+      assertSheetOpen(current);
       // RBAC dentro del cerrojo: cada tipo de cambio real exige su permiso.
       for (const permission of editPermissions(dto, current)) await this.access.require(current.tournamentId, user.id, permission, session);
       const phases = current.stage ? await this.phasesOf(current.tournamentId, session) : [];
@@ -199,14 +210,24 @@ export class MatchesService {
       const status = dto.status ?? current.status;
       const inPlay = status === MatchStatus.LIVE || status === MatchStatus.FINISHED;
       if (inPlay && (status !== current.status || moving)) assertStarted(tournamentStatus);
+      // Suspendido = pendiente de decisión: solo se edita para decidir (cambiando su estado).
+      const deciding = current.status === MatchStatus.SUSPENDED && status !== MatchStatus.SUSPENDED;
+      if (current.status === MatchStatus.SUSPENDED && !deciding) {
+        throw new ConflictException('El partido está suspendido: primero decide qué pasa con él (reanudar, reprogramar, posponer o cancelar)');
+      }
       await this.assertStatusChange(current, dto.status, session);
-      // Con el torneo en curso, reprogramar, posponer o cancelar exige un motivo (queda en el historial).
+      // Con el torneo en curso, reprogramar, posponer, cancelar o decidir sobre una suspensión exige
+      // un motivo (queda en el historial).
       const reason = dto.reason?.trim() || null;
       const reschedules = (dto.date !== undefined && dto.date !== current.date) || (dto.time !== undefined && dto.time !== current.time);
       const suspends = (status === MatchStatus.POSTPONED || status === MatchStatus.CANCELLED) && status !== current.status;
-      if (tournamentStatus === TournamentStatus.ACTIVE && (reschedules || suspends) && !reason) {
+      if (tournamentStatus === TournamentStatus.ACTIVE && (reschedules || suspends || deciding) && !reason) {
         throw new BadRequestException(
-          reschedules ? 'Indica el motivo de la reprogramación' : `Indica el motivo para ${status === MatchStatus.POSTPONED ? 'posponer' : 'cancelar'} el partido`,
+          deciding
+            ? 'Indica el motivo de la decisión sobre el partido suspendido'
+            : reschedules
+              ? 'Indica el motivo de la reprogramación'
+              : `Indica el motivo para ${status === MatchStatus.POSTPONED ? 'posponer' : 'cancelar'} el partido`,
         );
       }
 
@@ -220,7 +241,31 @@ export class MatchesService {
       }
 
       // Cancha: se valida si queda asignada (nueva, o con fecha/hora/estado/torneo distintos).
-      const nextField = dto.fieldId === undefined ? current.fieldId : dto.fieldId ? toObjectId(dto.fieldId) : null;
+      let nextField = dto.fieldId === undefined ? current.fieldId : dto.fieldId ? toObjectId(dto.fieldId) : null;
+      let referees = current.referees ?? [];
+      let released: Released[] = [];
+      // Reprogramación confirmada (2C-2): se recalcula aquí, dentro del cerrojo, qué choca en el
+      // nuevo horario. Si no coincide con lo que el organizador vio y confirmó → 409 con la vista
+      // previa nueva. Si coincide, se libera SOLO eso; lo demás se conserva y se valida abajo.
+      if (dto.release) {
+        const plan = await this.plan(session, current, { tournamentId: toObjectId(tournamentId), date: dto.date ?? current.date, time: dto.time ?? current.time, status, fieldId: nextField });
+        if (!sameRelease(plan.release, dto.release)) throw staleError(plan);
+        if (plan.release.field) nextField = null;
+        if (plan.release.assignmentIds.length) {
+          await this.referees.release(session, current._id, plan.release.assignmentIds);
+          referees = (await this.reload(id, before.tournamentId, session)).referees ?? [];
+        }
+        if (plan.release.field || plan.release.assignmentIds.length) {
+          released = [
+            {
+              matchId: current._id.toHexString(),
+              fieldId: plan.release.field ? plan.field!.fieldId : null,
+              venue: plan.release.field ? plan.field!.label : null,
+              referees: plan.referees.filter((r) => r.action === 'RELEASE').map((r) => ({ refereeId: r.refereeId, role: r.role })),
+            },
+          ];
+        }
+      }
       const fieldChanged = !sameId(nextField ?? '', current.fieldId ?? '');
       const field = await this.venues.assign(session, {
         matchId: current._id,
@@ -235,7 +280,7 @@ export class MatchesService {
       // Sus árbitros en funciones tampoco pueden quedar en dos partidos a la vez.
       await this.referees.revalidateMatch(session, {
         _id: current._id,
-        referees: current.referees ?? [],
+        referees,
         tournamentId,
         venueId: field.fieldId ? field.venueId : fieldChanged ? null : current.venueId,
         date: dto.date ?? current.date,
@@ -243,7 +288,7 @@ export class MatchesService {
         status,
       });
 
-      const { reason: _reason, ...fields } = dto;
+      const { reason: _reason, release: _release, ...fields } = dto;
       const update: Record<string, unknown> = { ...fields };
       if (field.fieldId) Object.assign(update, { fieldId: field.fieldId, venueId: field.venueId, venue: field.venue });
       else if (fieldChanged) Object.assign(update, { fieldId: null, venueId: null, venue: dto.venue ?? null });
@@ -261,7 +306,12 @@ export class MatchesService {
       const updated = await this.matches
         .findByIdAndUpdate(id, update, { new: true, runValidators: true, session })
         .lean();
-      await this.log.edited(session, { userId: user.id }, current, updated!, reason);
+      const decision = deciding ? DECISION[status as keyof typeof DECISION] : null;
+      if (decision) await this.incidents.resolveSuspension(session, current, decision, reason, user.id);
+      await this.log.edited(session, { userId: user.id }, current, updated!, reason, {
+        released,
+        ...(decision ? { action: MatchLogAction.SUSPENSION_RESOLVED, extra: { decision: { from: null, to: decision } } } : {}),
+      });
       // Un cambio de estado en una eliminatoria (p. ej. LIVE → FINISHED) puede decidir la llave.
       if (current.stage?.tie && dto.status && dto.status !== current.status) {
         await this.competition.syncKnockout(current.tournamentId, session, { userId: user.id });
@@ -271,11 +321,55 @@ export class MatchesService {
     return withWarnings(saved, warnings);
   }
 
+  /**
+   * Vista previa de una reprogramación (2C-2): qué cancha y qué árbitros se conservan y cuáles
+   * chocarían en el nuevo horario y habría que liberar. No escribe nada; la confirmación
+   * (`PATCH` con `release`) lo vuelve a calcular dentro del cerrojo.
+   */
+  async reschedulePreview(id: string, dto: ReschedulePreviewDto, user: AuthUser) {
+    const match = await this.ownership.match(id, user, Permission.SCHEDULE);
+    const fieldId = dto.fieldId === undefined ? match.fieldId : dto.fieldId ? toObjectId(dto.fieldId) : null;
+    return this.plan(null, match, { tournamentId: match.tournamentId, date: dto.date, time: dto.time, status: dto.status ?? match.status, fieldId });
+  }
+
+  private async plan(
+    session: ClientSession | null,
+    match: Match & { _id: Types.ObjectId },
+    target: { tournamentId: Types.ObjectId; date: string; time: string; status: MatchStatus; fieldId: Types.ObjectId | null },
+  ) {
+    const probe = target.fieldId ? await this.venues.probe(session, { matchId: match._id, ...target, fieldId: target.fieldId }) : null;
+    const releaseField = !!probe?.conflicts.length;
+    const refs = await this.referees.probe(session, {
+      _id: match._id,
+      referees: match.referees ?? [],
+      tournamentId: target.tournamentId,
+      // Sin la cancha (liberada o sin asignar), el margen es el de por defecto, como en 2A.
+      venueId: probe && !releaseField ? probe.venueId : null,
+      date: target.date,
+      time: target.time,
+      status: target.status,
+    });
+    const action = (conflicts: unknown[]) => (conflicts.length ? ('RELEASE' as const) : ('KEEP' as const));
+    const referees = refs.map((r) => ({ ...r, action: action(r.conflicts) }));
+    const release = { field: releaseField, assignmentIds: referees.filter((r) => r.action === 'RELEASE').map((r) => r.assignmentId).sort() };
+    return {
+      date: target.date,
+      time: target.time,
+      status: target.status,
+      reserves: reserves(target.status),
+      field: probe ? { fieldId: probe.fieldId, label: probe.label, action: action(probe.conflicts), conflicts: probe.conflicts, warnings: probe.warnings } : null,
+      referees,
+      release,
+      needsConfirmation: release.field || release.assignmentIds.length > 0,
+    };
+  }
+
   /** Solo se eliminan partidos sin resultado ni estadísticas (p. ej. mal programados). */
   async remove(id: string, user: AuthUser) {
     const before = await this.ownership.match(id, user, Permission.SCHEDULE);
     await this.ownership.inTournament(before.tournamentId, { user, permission: Permission.SCHEDULE }, async (session) => {
       const match = await this.reload(id, before.tournamentId, session);
+      assertSheetOpen(match);
       const phases = match.stage ? await this.phasesOf(match.tournamentId, session) : [];
       this.competition.assertStageWrite(phases, match.stage, { remove: true });
       if (
@@ -312,12 +406,24 @@ export class MatchesService {
     await this.ownership.inTournament(before.tournamentId, { user, permission: Permission.RESULTS }, async (session, status) => {
       assertStarted(status);
       const match = await this.reload(id, before.tournamentId, session);
+      // Ficha técnica cerrada (2D): resultado y estadísticas congelados (también ante una carrera con el cierre).
+      assertSheetOpen(match);
+      // Suspendido: dar el partido por terminado con un resultado es una decisión sobre la
+      // suspensión (también exige INCIDENTS); seguir en vivo exige reanudarlo primero.
+      const closesSuspension = match.status === MatchStatus.SUSPENDED;
+      if (closesSuspension) {
+        if (dto.status !== MatchStatus.FINISHED) {
+          throw new ConflictException('El partido está suspendido: reanúdalo para seguir capturando en vivo, o captura el resultado final');
+        }
+        await this.access.require(match.tournamentId, user.id, Permission.INCIDENTS, session);
+      }
       if (match.status === MatchStatus.CANCELLED) {
         throw new ConflictException(
           'El partido está cancelado; cambia su estado antes de capturar un resultado',
         );
       }
       await this.validateStats(match, dto, session);
+      await this.assertLineupConsistent(match._id, dto.playerStats, session);
       const extras = {
         homeScore: dto.homeScore,
         awayScore: dto.awayScore,
@@ -374,6 +480,7 @@ export class MatchesService {
         );
       }
       const after = await this.matches.findById(match._id).session(session).lean();
+      if (closesSuspension) await this.incidents.resolveSuspension(session, match, SuspensionDecision.FINISHED, null, user.id);
       await this.log.result(session, { userId: user.id }, match, after!);
       // Eliminatoria: el bracket se deriva del resultado (mismo cerrojo y misma transacción).
       if (match.stage?.tie) await this.competition.syncKnockout(match.tournamentId, session, { userId: user.id });
@@ -446,9 +553,7 @@ export class MatchesService {
         (m) =>
           sameId(m.playerId, s.playerId) &&
           sameId(m.teamId, s.teamId) &&
-          (m.active ||
-            (m.startDate <= match.date &&
-              (m.endDate === null || m.endDate >= match.date))),
+          belongsOn(m, match.date),
       );
       if (!belongs)
         errors.push(
@@ -456,6 +561,37 @@ export class MatchesService {
         );
     }
     if (errors.length) throw new BadRequestException(errors);
+  }
+
+  /**
+   * Con alineación en la ficha técnica (2D), lo capturado como jugado debe coincidir con ella:
+   * titulares y suplentes que ingresaron, y nadie más (un suplente que no entró no jugó).
+   */
+  private async assertLineupConsistent(matchId: Types.ObjectId, rows: { playerId: string; teamId: string; played: boolean }[], session: ClientSession) {
+    const sheet = await this.sheets.findOne({ matchId }).select('teams').session(session).lean();
+    for (const team of sheet?.teams ?? []) {
+      if (!team.players.length) continue;
+      const played = new Set(rows.filter((r) => r.played && sameId(r.teamId, team.teamId)).map((r) => r.playerId));
+      const { missing, extra } = participationMismatch(participationOf(team).participants, played);
+      if (!missing.length && !extra.length) continue;
+      const names = await this.playerNames([...missing, ...extra], session);
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'LINEUP_MISMATCH',
+        message: [
+          missing.length ? `Según la alineación de la ficha jugaron y no están marcados: ${missing.map((id) => names.get(id)).join(', ')}` : null,
+          extra.length ? `Marcados como jugados sin participar según la alineación: ${extra.map((id) => names.get(id)).join(', ')}` : null,
+        ]
+          .filter(Boolean)
+          .join('. '),
+      });
+    }
+  }
+
+  private async playerNames(ids: string[], session: ClientSession) {
+    const list = await this.players.find({ _id: { $in: ids.map(toObjectId) } }).select('firstName lastName').session(session).lean();
+    const names = new Map(list.map((p) => [p._id.toHexString(), `${p.firstName} ${p.lastName}`]));
+    return new Map(ids.map((id) => [id, names.get(id) ?? id]));
   }
 
   private async assertTeams(
@@ -488,6 +624,9 @@ export class MatchesService {
    * - Un partido con marcador o estadísticas (FINISHED o LIVE) solo puede estar LIVE o FINISHED:
    *   posponerlo, cancelarlo o devolverlo a programado dejaría resultados incoherentes.
    * - Sin resultado: SCHEDULED ↔ POSTPONED (reprogramar), → LIVE, → CANCELLED y vuelta a SCHEDULED.
+   * - SUSPENDED solo con una incidencia de suspensión. Desde SUSPENDED (2C-2): → LIVE (reanudar),
+   *   → SCHEDULED (reprogramar; conserva el marcador parcial si lo hay), → POSTPONED / CANCELLED
+   *   (solo sin marcador ni estadísticas) o → FINISHED (con marcador).
    */
   private async assertStatusChange(
     current: Match & { _id: Types.ObjectId },
@@ -495,7 +634,12 @@ export class MatchesService {
     session: ClientSession,
   ) {
     if (!next || next === current.status) return;
+    if (next === MatchStatus.SUSPENDED) {
+      throw new BadRequestException('Para suspender un partido registra una incidencia de suspensión');
+    }
     const hasScore = current.homeScore !== null || current.awayScore !== null;
+    // Reprogramar un suspendido con marcador parcial: se reanudará desde ese marcador (nada se borra).
+    if (current.status === MatchStatus.SUSPENDED && next === MatchStatus.SCHEDULED) return;
     if (next === MatchStatus.FINISHED) {
       if (!hasScore)
         throw new BadRequestException('Un partido FINISHED necesita marcador: captúralo con PUT /matches/:id/result');
@@ -608,8 +752,12 @@ function editPermissions(dto: UpdateMatchDto, current: Match): Permission[] {
   const perms = new Set<Permission>();
   if (dto.fieldId !== undefined && !sameId(dto.fieldId ?? '', current.fieldId ?? '')) perms.add(Permission.ASSIGNMENTS);
   if (dto.status !== undefined && dto.status !== current.status) {
-    perms.add(dto.status === MatchStatus.LIVE || dto.status === MatchStatus.FINISHED ? Permission.RESULTS : Permission.SCHEDULE);
+    // Reanudar un suspendido es gestionar la incidencia (2C-2), no capturar.
+    if (current.status === MatchStatus.SUSPENDED && dto.status === MatchStatus.LIVE) perms.add(Permission.INCIDENTS);
+    else perms.add(dto.status === MatchStatus.LIVE || dto.status === MatchStatus.FINISHED ? Permission.RESULTS : Permission.SCHEDULE);
   }
+  // Liberar cancha o árbitros al reprogramar también es gestionar asignaciones.
+  if (dto.release && (dto.release.field || dto.release.assignmentIds.length)) perms.add(Permission.ASSIGNMENTS);
   const differs = (a: unknown, b: unknown) => a !== undefined && String(a ?? '') !== String(b ?? '');
   const scheduling =
     differs(dto.date, current.date) ||
@@ -622,4 +770,13 @@ function editPermissions(dto: UpdateMatchDto, current: Match): Permission[] {
     (!(dto.fieldId ?? current.fieldId) && differs(dto.venue, current.venue));
   if (scheduling || !perms.size) perms.add(Permission.SCHEDULE);
   return [...perms];
+}
+
+function staleError(preview: object) {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'RESCHEDULE_STALE',
+    message: 'La disponibilidad cambió desde la vista previa: revisa de nuevo qué se conserva y qué se libera.',
+    preview,
+  });
 }

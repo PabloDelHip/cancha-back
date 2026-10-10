@@ -75,6 +75,7 @@ export class ScheduleService {
           (m) =>
             m.status === MatchStatus.FINISHED ||
             m.status === MatchStatus.LIVE ||
+            m.status === MatchStatus.SUSPENDED ||
             m.homeScore !== null ||
             m.awayScore !== null,
         ).length ||

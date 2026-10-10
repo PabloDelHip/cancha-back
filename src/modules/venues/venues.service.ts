@@ -28,7 +28,7 @@ import {
 } from './occupancy.js';
 
 /** Partidos que todavía se jugarán en la cancha: impiden desactivarla o eliminarla. */
-const PENDING = [MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.POSTPONED];
+const PENDING = [MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.POSTPONED, MatchStatus.SUSPENDED];
 
 type LeanVenue = Venue & { _id: Types.ObjectId };
 type TournamentDuration = { _id: Types.ObjectId; name: string; information?: { schedule?: { durationMinutes?: number | null } } };
@@ -270,6 +270,25 @@ export class VenuesService {
       if (conflicts.length) throw conflictError(venueLabel(venue.name, field.name), conflicts);
     }
     return { venueId: venue._id, fieldId: field._id, venue: venueLabel(venue.name, field.name), warnings: availabilityWarnings(field.availability, slot) };
+  }
+
+  /**
+   * Choques de una cancha si el partido pasara a ese horario (vista previa de una reprogramación,
+   * 2C-2). No escribe ni bloquea: `assign` lo vuelve a validar con el cerrojo de la sede.
+   */
+  async probe(session: ClientSession | null, input: { matchId: Types.ObjectId; tournamentId: Types.ObjectId; date: string; time: string; status: MatchStatus; fieldId: Types.ObjectId }) {
+    const tournament = await this.tournaments.findById(input.tournamentId).select('information.schedule.durationMinutes').session(session).lean();
+    const venue = await this.venues.findOne({ 'fields._id': input.fieldId }).session(session).lean();
+    if (!venue) throw new NotFoundException('Cancha no encontrada');
+    const field = fieldOf(venue, input.fieldId, { archived: true });
+    const slot: Slot = { date: input.date, time: input.time, duration: durationOf(tournament), buffer: venue.bufferMinutes };
+    return {
+      fieldId: field._id.toHexString(),
+      venueId: venue._id,
+      label: venueLabel(venue.name, field.name),
+      conflicts: reserves(input.status) ? await this.conflicts(field._id, slot, input.matchId, session, null) : [],
+      warnings: availabilityWarnings(field.availability, slot),
+    };
   }
 
   /**

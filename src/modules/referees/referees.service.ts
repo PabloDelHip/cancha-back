@@ -14,11 +14,12 @@ import { sameId, serialize, toObjectId } from '../../common/utils/serialize.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { addDays, availabilityWarnings, clockOf, conflictsAmong, DEFAULT_BUFFER_MINUTES, durationOf, interval, overlaps, RESERVING, reserves, type Slot } from '../venues/occupancy.js';
 import { MatchLogService } from '../match-log/match-log.service.js';
+import { assertSheetOpen } from '../matches/match-rules.js';
 import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
-import type { AssignRefereeDto, CreateRefereeDto, RefereeAbsenceDto, UpdateRefereeDto } from './dto/referee.dto.js';
+import type { AssignRefereeDto, CreateRefereeDto, RefereeAbsenceDto, RefereeCorrectionDto, UpdateRefereeDto } from './dto/referee.dto.js';
 
 /** Partidos por jugar: impiden desactivar o eliminar al árbitro asignado. */
-const PENDING = [MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.POSTPONED];
+const PENDING = [MatchStatus.SCHEDULED, MatchStatus.LIVE, MatchStatus.POSTPONED, MatchStatus.SUSPENDED];
 const ACTIVE = RefereeAssignmentStatus.ASSIGNED;
 
 type LeanReferee = Referee & { _id: Types.ObjectId };
@@ -135,7 +136,7 @@ export class RefereesService {
       d.referees
         .filter((a) => sameId(a.refereeId, ref._id))
         .map((a) => {
-          const replacedBy = d.referees.find((x) => x.substituteFor && sameId(x.substituteFor, a._id));
+          const replacedBy = d.referees.find((x) => x.substituteFor && sameId(x.substituteFor, a._id) && x.status !== RefereeAssignmentStatus.VOID);
           const replaced = a.substituteFor ? d.referees.find((x) => sameId(x._id, a.substituteFor!)) : undefined;
           return {
             assignmentId: a._id.toHexString(),
@@ -203,6 +204,7 @@ export class RefereesService {
     let warnings: string[] = [];
     await this.ownership.inTournament(before.tournamentId, { user, permission: Permission.ASSIGNMENTS }, async (session) => {
       const match = await this.reload(matchId, session);
+      assertSheetOpen(match);
       if (match.referees.some((a) => a.status === ACTIVE && a.role === dto.role)) {
         throw new ConflictException('Ese rol ya tiene árbitro: quítalo o márcalo como ausente primero');
       }
@@ -219,6 +221,7 @@ export class RefereesService {
     const before = await this.ownership.match(matchId, user, Permission.ASSIGNMENTS);
     await this.ownership.inTournament(before.tournamentId, { user, permission: Permission.ASSIGNMENTS }, async (session) => {
       const match = await this.reload(matchId, session);
+      assertSheetOpen(match);
       const a = match.referees.find((x) => sameId(x._id, assignmentId));
       if (!a) throw new NotFoundException('Asignación no encontrada');
       // Ausente, sustituido o sustituto: es la historia de quién arbitró y no se borra.
@@ -243,6 +246,7 @@ export class RefereesService {
     let warnings: string[] = [];
     await this.ownership.inTournament(before.tournamentId, { user, permission: Permission.ASSIGNMENTS }, async (session) => {
       const match = await this.reload(matchId, session);
+      assertSheetOpen(match);
       const a = match.referees.find((x) => sameId(x._id, assignmentId));
       if (!a) throw new NotFoundException('Asignación no encontrada');
       if (a.status !== ACTIVE) throw new ConflictException('Ya está registrado como ausente');
@@ -269,6 +273,139 @@ export class RefereesService {
       );
     });
     return this.matchView(matchId, warnings);
+  }
+
+  /**
+   * Corrección justificada de una ausencia o una sustitución mal registradas (2C-2). Nada se borra:
+   * lo corregido queda VOID (o la ausencia anulada en `absenceVoided`) con quién, cuándo y por qué.
+   * Lo que vuelve a quedar en funciones (el árbitro restituido o el sustituto correcto) pasa por las
+   * mismas validaciones que una asignación: organizador, activo, rol libre y sin choques.
+   *
+   * - Ausencia sin `substituteId`: sí se presentó. Se anula su sustituto (si lo hay) y se restituye.
+   * - Ausencia con `substituteId`: la ausencia vale, el sustituto no (o faltaba): se anula el
+   *   sustituto actual y entra el correcto.
+   * - Sustituto: se anula; con `substituteId` entra el correcto, sin él la ausencia queda sin sustituto.
+   * Una cadena (el sustituto también faltó) se corrige desde el final.
+   */
+  async correct(matchId: string, assignmentId: string, dto: RefereeCorrectionDto, user: AuthUser) {
+    const before = await this.ownership.match(matchId, user, Permission.REFEREE_CORRECTIONS);
+    let warnings: string[] = [];
+    await this.ownership.inTournament(before.tournamentId, { user, permission: Permission.REFEREE_CORRECTIONS }, async (session) => {
+      const match = await this.reload(matchId, session);
+      assertSheetOpen(match);
+      const a = match.referees.find((x) => sameId(x._id, assignmentId));
+      if (!a) throw new NotFoundException('Asignación no encontrada');
+      if (a.status === RefereeAssignmentStatus.VOID || a.status === RefereeAssignmentStatus.RELEASED) {
+        throw new ConflictException(`Esta asignación ya está ${a.status === RefereeAssignmentStatus.VOID ? 'anulada' : 'liberada'}`);
+      }
+      if (a.status === ACTIVE && !a.substituteFor) {
+        throw new ConflictException('No hay ausencia ni sustitución que corregir: para retirar a este árbitro usa Quitar');
+      }
+      const role = await this.access.roleOf(match.tournamentId, user.id, session);
+      const correction = { at: new Date(), by: toObjectId(user.id), role, reason: dto.reason };
+      const snap = (x: RefereeAssignment, status: RefereeAssignmentStatus = x.status) => ({ assignmentId: x._id.toHexString(), refereeId: x.refereeId.toHexString(), role: x.role, status });
+      const changes: Record<string, { from: unknown; to: unknown }> = {};
+      const voidOne = async (x: RefereeAssignment) => {
+        // Un sustituto que a su vez faltó tiene historia propia: se corrige primero lo posterior.
+        if (x.status !== ACTIVE || match.referees.some((y) => y.substituteFor && sameId(y.substituteFor, x._id) && y.status !== RefereeAssignmentStatus.VOID)) {
+          throw new ConflictException('Esa sustitución tiene registros posteriores (otra ausencia o sustituto): corrígelos primero');
+        }
+        await this.matches.updateOne(
+          { _id: match._id, 'referees._id': x._id },
+          { $set: { 'referees.$.status': RefereeAssignmentStatus.VOID, 'referees.$.voided': correction } },
+          { session },
+        );
+        changes.voided = { from: snap(x), to: snap(x, RefereeAssignmentStatus.VOID) };
+      };
+      const currentSubstituteOf = (x: RefereeAssignment) => match.referees.find((y) => y.substituteFor && sameId(y.substituteFor, x._id) && y.status !== RefereeAssignmentStatus.VOID && y.status !== RefereeAssignmentStatus.RELEASED);
+
+      let absent: RefereeAssignment;
+      if (a.status === RefereeAssignmentStatus.ABSENT) {
+        absent = a;
+        const sub = currentSubstituteOf(a);
+        if (sub) await voidOne(sub);
+        if (!dto.substituteId) {
+          // Sí se presentó: vuelve a sus funciones (validado como una asignación nueva).
+          warnings = await this.restore(session, await this.reload(matchId, session), a);
+          await this.matches.updateOne(
+            { _id: match._id, 'referees._id': a._id },
+            {
+              $set: { 'referees.$.status': ACTIVE, 'referees.$.absentAt': null, 'referees.$.absenceNote': null },
+              $push: { 'referees.$.absenceVoided': { ...correction, absentAt: a.absentAt, absenceNote: a.absenceNote } },
+            },
+            { session },
+          );
+          changes.absence = { from: snap(a), to: snap(a, ACTIVE) };
+        }
+      } else {
+        // Sustituto equivocado: se anula; la ausencia a la que cubría sigue registrada.
+        absent = match.referees.find((y) => sameId(y._id, a.substituteFor!))!;
+        await voidOne(a);
+      }
+      if (dto.substituteId) {
+        const updated = await this.reload(matchId, session);
+        if (updated.referees.some((x) => x.status === ACTIVE && x.role === absent.role)) throw new ConflictException('Ese rol ya tiene árbitro en funciones');
+        warnings = await this.add(session, updated, dto.substituteId, absent.role, absent._id);
+        changes.substitute = { from: null, to: { refereeId: dto.substituteId, role: absent.role, substituteFor: absent._id.toHexString() } };
+      }
+      await this.refreshCentral({ _id: match._id }, session);
+      await this.log.referee(session, { userId: user.id }, match, MatchLogAction.REFEREE_CORRECTED, changes, dto.reason);
+    });
+    return this.matchView(matchId, warnings);
+  }
+
+  /** Restituir a un árbitro marcado ausente por error: mismas validaciones que asignarlo. */
+  private async restore(session: ClientSession, match: Match & { _id: Types.ObjectId }, a: RefereeAssignment) {
+    const tournament = await this.tournaments.findById(match.tournamentId).select('organizerId').session(session).lean();
+    const ref = await this.referees.findOneAndUpdate({ _id: a.refereeId }, { $inc: { writeSeq: 1 } }, { session, returnDocument: 'after' }).lean();
+    if (!ref || !tournament || !sameId(ref.organizerId, tournament.organizerId)) throw new BadRequestException('El árbitro no es del organizador del torneo');
+    // Un partido ya jugado se corrige aunque el árbitro se haya desactivado después.
+    if (match.status !== MatchStatus.FINISHED && (!ref.active || ref.archived)) throw new ConflictException('El árbitro está desactivado: no puede volver a este partido');
+    if (match.referees.some((x) => x.status === ACTIVE && x.role === a.role)) throw new ConflictException('Ese rol ya tiene árbitro en funciones');
+    if (match.referees.some((x) => x.status === ACTIVE && sameId(x.refereeId, a.refereeId))) throw new ConflictException('Ese árbitro ya tiene otro rol en este partido');
+    const slot = await this.slotOf(match, null, session);
+    if (reserves(match.status)) {
+      const conflicts = await this.conflicts(ref._id, slot, match._id, session, null);
+      if (conflicts.length) throw conflictError(refereeName(ref), conflicts);
+    }
+    return availabilityWarnings(ref.availability, slot, { subject: refereeName(ref), of: 'del árbitro' });
+  }
+
+  /**
+   * Choques de cada árbitro en funciones si el partido pasara a `next` (vista previa de una
+   * reprogramación, 2C-2). No escribe ni bloquea: la confirmación lo vuelve a calcular dentro del
+   * cerrojo.
+   */
+  async probe(session: ClientSession | null, next: { _id: Types.ObjectId; referees: RefereeAssignment[]; tournamentId: Types.ObjectId; venueId: Types.ObjectId | null; date: string; time: string; status: MatchStatus }) {
+    const active = next.referees.filter((a) => a.status === ACTIVE);
+    if (!active.length) return [];
+    const slot = await this.slotOf(next, null, session);
+    const refs = await this.referees.find({ _id: { $in: active.map((a) => a.refereeId) } }).select('firstName lastName availability').session(session).lean();
+    const byId = new Map(refs.map((r) => [r._id.toHexString(), r]));
+    return Promise.all(
+      active.map(async (a) => {
+        const r = byId.get(a.refereeId.toHexString());
+        return {
+          assignmentId: a._id.toHexString(),
+          refereeId: a.refereeId.toHexString(),
+          name: r ? refereeName(r) : null,
+          role: a.role,
+          conflicts: reserves(next.status) ? await this.conflicts(a.refereeId, slot, next._id, session, null) : [],
+          warnings: r ? availabilityWarnings(r.availability, slot, { subject: refereeName(r), of: 'del árbitro' }) : [],
+        };
+      }),
+    );
+  }
+
+  /** Libera (RELEASED, se conserva) asignaciones que chocan en el nuevo horario del partido. */
+  async release(session: ClientSession, matchId: Types.ObjectId, assignmentIds: string[]) {
+    if (!assignmentIds.length) return;
+    await this.matches.updateOne(
+      { _id: matchId },
+      { $set: { 'referees.$[a].status': RefereeAssignmentStatus.RELEASED, 'referees.$[a].releasedAt': new Date() } },
+      { session, arrayFilters: [{ 'a._id': { $in: assignmentIds.map(toObjectId) }, 'a.status': ACTIVE }] },
+    );
+    await this.refreshCentral({ _id: matchId }, session);
   }
 
   /** Alta de una asignación dentro de la transacción del partido, con el cerrojo del árbitro. */

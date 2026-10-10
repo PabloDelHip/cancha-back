@@ -28,6 +28,26 @@ export class RefereeAssignment {
 
   @Prop({ type: Date, default: null })
   absentAt: Date | null;
+
+  /** Liberada al reprogramar (status RELEASED): chocaba en el nuevo horario. */
+  @Prop({ type: Date, default: null })
+  releasedAt: Date | null;
+
+  /** Anulación explícita (status VOID, 2C-2): se registró por error. */
+  @Prop({ type: Object, default: null })
+  voided: AssignmentCorrection | null;
+
+  /** Ausencias anuladas (sí se presentó): la ausencia original y quién la corrigió y por qué. */
+  @Prop({ type: [Object], default: [] })
+  absenceVoided: (AssignmentCorrection & { absentAt: Date | null; absenceNote: string | null })[];
+}
+
+/** Quién corrigió un registro arbitral, cuándo y por qué. */
+export interface AssignmentCorrection {
+  at: Date;
+  by: Types.ObjectId;
+  role: string | null;
+  reason: string;
 }
 export const RefereeAssignmentSchema = SchemaFactory.createForClass(RefereeAssignment);
 
@@ -70,7 +90,8 @@ export class Match {
 
   /**
    * Árbitros asignados (Módulo 2B). Un ausente queda ABSENT y su sustituto se agrega con
-   * `substituteFor`: nunca se borra una asignación con historia.
+   * `substituteFor`: nunca se borra una asignación con historia. Una corrección la anula (VOID) y
+   * una reprogramación que choca la libera (RELEASED); ambas se conservan (2C-2).
    */
   @Prop({ type: [RefereeAssignmentSchema], default: [] })
   referees: RefereeAssignment[];
@@ -119,13 +140,22 @@ export class Match {
   @Prop({ type: Object, default: null })
   postponedFrom: { date: string; time: string } | null;
 
+  /**
+   * Ficha técnica cerrada (2D), independiente del estado del partido: congela resultado,
+   * estadísticas, alineaciones, sustituciones, árbitros, incidencias y observaciones. Guarda quién
+   * la cerró y el marcador que quedó congelado. null = abierta (también los partidos anteriores).
+   */
+  @Prop({ type: Object, default: null })
+  sheetClosed: { at: Date; by: Types.ObjectId; role: string | null; homeScore: number | null; awayScore: number | null } | null;
+
   createdAt: Date;
   updatedAt: Date;
 }
 
 export type MatchDocument = HydratedDocument<Match>;
 export const MatchSchema = SchemaFactory.createForClass(Match);
-MatchSchema.index({ tournamentId: 1, date: 1, time: 1 });
+// Calendario y agenda (2C-3): filtro por torneos y orden cronológico estable (_id desempata).
+MatchSchema.index({ tournamentId: 1, date: 1, time: 1, _id: 1 });
 MatchSchema.index({ status: 1, date: 1 });
 MatchSchema.index({ homeTeamId: 1, date: 1 });
 MatchSchema.index({ awayTeamId: 1, date: 1 });

@@ -18,6 +18,9 @@ import { DisciplineLog } from '../discipline/schemas/discipline-log.schema.js';
 import { RefereesService } from '../referees/referees.service.js';
 import { MatchLogService } from '../match-log/match-log.service.js';
 import { MatchLog } from '../match-log/schemas/match-log.schema.js';
+import { MatchIncident } from '../match-incidents/schemas/match-incident.schema.js';
+import { MatchSheet } from '../match-sheet/schemas/match-sheet.schema.js';
+import { MatchEvidence } from '../match-sheet/schemas/match-evidence.schema.js';
 import { TournamentMember } from './schemas/tournament-member.schema.js';
 import { TournamentInvitation } from './schemas/tournament-invitation.schema.js';
 import { assertAssignmentsReleased, VenuesService } from '../venues/venues.service.js';
@@ -65,6 +68,9 @@ export class TournamentsService {
     @InjectModel(Sanction.name) private readonly sanctions: Model<Sanction>,
     @InjectModel(DisciplineLog.name) private readonly disciplineLog: Model<DisciplineLog>,
     @InjectModel(MatchLog.name) private readonly matchLogs: Model<MatchLog>,
+    @InjectModel(MatchIncident.name) private readonly matchIncidents: Model<MatchIncident>,
+    @InjectModel(MatchSheet.name) private readonly matchSheets: Model<MatchSheet>,
+    @InjectModel(MatchEvidence.name) private readonly matchEvidence: Model<MatchEvidence>,
     @InjectModel(TournamentMember.name) private readonly members: Model<TournamentMember>,
     @InjectModel(TournamentInvitation.name) private readonly invitations: Model<TournamentInvitation>,
     private readonly ownership: OwnershipService,
@@ -205,7 +211,7 @@ export class TournamentsService {
           const played = await this.matches
             .exists({
               tournamentId,
-              $or: [{ status: { $in: [MatchStatus.LIVE, MatchStatus.FINISHED] } }, { homeScore: { $ne: null } }, { awayScore: { $ne: null } }],
+              $or: [{ status: { $in: [MatchStatus.LIVE, MatchStatus.FINISHED, MatchStatus.SUSPENDED] } }, { homeScore: { $ne: null } }, { awayScore: { $ne: null } }],
             })
             .session(session);
           if (played) {
@@ -226,7 +232,7 @@ export class TournamentsService {
         if (
           rulesChanged &&
           (await this.matches
-            .exists({ tournamentId, 'stage.tie': { $ne: null }, $or: [{ status: { $in: [MatchStatus.LIVE, MatchStatus.FINISHED] } }, { homeScore: { $ne: null } }] })
+            .exists({ tournamentId, 'stage.tie': { $ne: null }, $or: [{ status: { $in: [MatchStatus.LIVE, MatchStatus.FINISHED, MatchStatus.SUSPENDED] } }, { homeScore: { $ne: null } }] })
             .session(session))
         ) {
           throw new ConflictException('Ya hay llaves de eliminatoria jugadas: la regla de desempate ya no puede cambiar');
@@ -306,13 +312,14 @@ export class TournamentsService {
       scheduled: by(MatchStatus.SCHEDULED),
       live: by(MatchStatus.LIVE),
       postponed: by(MatchStatus.POSTPONED),
+      suspended: by(MatchStatus.SUSPENDED),
       finished: by(MatchStatus.FINISHED),
       cancelled: by(MatchStatus.CANCELLED),
     };
     return {
       total: rows.reduce((sum, r) => sum + r.n, 0),
       ...counts,
-      pending: counts.scheduled + counts.live + counts.postponed,
+      pending: counts.scheduled + counts.live + counts.postponed + counts.suspended,
     };
   }
 
@@ -345,6 +352,10 @@ export class TournamentsService {
       await this.disciplineLog.deleteMany({ tournamentId }, { session });
       // Historial de partidos (solo puede tener partidos ya eliminados: un torneo con partidos no se borra).
       await this.matchLogs.deleteMany({ tournamentId }, { session });
+      await this.matchIncidents.deleteMany({ tournamentId }, { session });
+      await this.matchSheets.deleteMany({ tournamentId }, { session });
+      // Sus fotografías quedan sin registro: el script evidence:cleanup borra esos archivos (privados).
+      await this.matchEvidence.deleteMany({ tournamentId }, { session });
       await this.members.deleteMany({ tournamentId }, { session });
       await this.invitations.deleteMany({ tournamentId }, { session });
       await this.tournaments.deleteOne({ _id: id }, { session });

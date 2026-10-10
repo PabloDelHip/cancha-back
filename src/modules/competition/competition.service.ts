@@ -321,7 +321,7 @@ export class CompetitionService {
       if (!(phase.bracket ?? []).some((t) => t.round === round && t.slot === slot)) throw new NotFoundException('Ese cruce no existe');
       const legs = matches.filter((m) => m.stage?.phase === phase.index && m.stage.tie?.round === round && m.stage.tie.slot === slot);
       const played =
-        legs.some((m) => m.status === MatchStatus.LIVE || m.status === MatchStatus.FINISHED || m.homeScore !== null || m.awayScore !== null) ||
+        legs.some((m) => m.status === MatchStatus.LIVE || m.status === MatchStatus.FINISHED || m.status === MatchStatus.SUSPENDED || m.homeScore !== null || m.awayScore !== null) ||
         (legs.length > 0 && (await this.stats.exists({ matchId: { $in: legs.map((m) => toObjectId(m.id)) } }).session(session)));
       if (played) throw new ConflictException('Ese cruce ya tiene resultado: no se puede quitar');
       if (legs.length) {

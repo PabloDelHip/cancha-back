@@ -29,6 +29,8 @@ export interface EnvConfig {
   CLOUDINARY_CLOUD_NAME: string | null;
   CLOUDINARY_API_KEY: string | null;
   CLOUDINARY_API_SECRET: string | null;
+  /** API de Cloudinary (por defecto la real). Solo se cambia para pruebas con un almacenamiento simulado. */
+  CLOUDINARY_API_URL: string;
 }
 
 /** Duraciones estilo "15m", "7d", "3600s" o segundos. */
@@ -104,6 +106,10 @@ export function validateEnv(raw: Record<string, unknown>): EnvConfig {
     errors.push('CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET van juntas (las tres o ninguna)');
   if (cloudinary[0] && !/^[a-z0-9_-]+$/i.test(cloudinary[0]))
     errors.push('CLOUDINARY_CLOUD_NAME no es válido');
+  const cloudinaryApi = str('CLOUDINARY_API_URL', 'https://api.cloudinary.com').replace(/\/+$/, '');
+  if (!/^https?:\/\/[^\s/]+/.test(cloudinaryApi)) errors.push('CLOUDINARY_API_URL no es una URL válida');
+  if (nodeEnv === 'production' && cloudinaryApi !== 'https://api.cloudinary.com')
+    errors.push('CLOUDINARY_API_URL solo puede cambiarse fuera de producción');
 
   if (errors.length)
     throw new Error(`Configuración inválida:\n - ${errors.join('\n - ')}`);
@@ -124,6 +130,7 @@ export function validateEnv(raw: Record<string, unknown>): EnvConfig {
     CLOUDINARY_CLOUD_NAME: cloudinary[0],
     CLOUDINARY_API_KEY: cloudinary[1],
     CLOUDINARY_API_SECRET: cloudinary[2],
+    CLOUDINARY_API_URL: cloudinaryApi,
   };
 }
 

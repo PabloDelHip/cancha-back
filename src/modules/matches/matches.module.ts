@@ -8,6 +8,7 @@ import { RefereesModule } from '../referees/referees.module.js';
 import { VenuesModule } from '../venues/venues.module.js';
 import { DisciplineModule } from '../discipline/discipline.module.js';
 import { CompetitionModule } from '../competition/competition.module.js';
+import { MatchIncidentsModule } from '../match-incidents/match-incidents.module.js';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { CompetitionModule } from '../competition/competition.module.js';
     VenuesModule,
     RefereesModule,
     MatchLogModule,
+    MatchIncidentsModule,
     MongooseModule.forFeature([
       Models.match,
       Models.playerMatchStats,
@@ -24,6 +26,7 @@ import { CompetitionModule } from '../competition/competition.module.js';
       Models.player,
       Models.membership,
       Models.round,
+      Models.matchSheet,
     ]),
   ],
   controllers: [MatchesController],

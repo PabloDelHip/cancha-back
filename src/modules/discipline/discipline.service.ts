@@ -434,6 +434,17 @@ export class DisciplineService {
     }
   }
 
+  /**
+   * Suspendidos para este partido entre estos jugadores, sin registrar nada (alineaciones de la
+   * ficha técnica, 2D). `block`: el reglamento no permite alinearlos. La incidencia de "jugó estando
+   * suspendido" la sigue registrando la captura de estadísticas (checkLineup), una sola vez.
+   */
+  async suspendedAmong(match: { _id: Types.ObjectId; tournamentId: Types.ObjectId }, playerIds: string[], session: ClientSession) {
+    const { rules, result } = await this.compute(match.tournamentId, session);
+    const suspended = new Set(suspendedIn(result, match._id.toHexString()).map((s) => s.playerId));
+    return { block: rules.eligibility === EligibilityMode.BLOCK, playerIds: playerIds.filter((id) => suspended.has(id)) };
+  }
+
   /** Tras un cambio de equipo, la sanción manual puede aplicar desde un partido del equipo nuevo. */
   private async playsFor(tournamentId: Types.ObjectId, playerId: Types.ObjectId, match: { homeTeamId: Types.ObjectId; awayTeamId: Types.ObjectId }, session: ClientSession) {
     return !!(await this.memberships
