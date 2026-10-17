@@ -9,6 +9,8 @@ import { Model, Types } from 'mongoose';
 import { normalizeSearch, Player, playerSearchName } from './schemas/player.schema.js';
 import { PlayerDuplicatesService } from './player-duplicates.service.js';
 import { TeamMembership } from './schemas/team-membership.schema.js';
+import { PlayerBlock } from './schemas/player-block.schema.js';
+import { RemovedEnrollment } from '../tournaments/schemas/removed-enrollment.schema.js';
 import { PlayerMatchStats } from '../matches/schemas/player-match-stats.schema.js';
 import { Tournament } from '../tournaments/schemas/tournament.schema.js';
 import {
@@ -45,6 +47,8 @@ export class PlayersService {
     private readonly stats: Model<PlayerMatchStats>,
     @InjectModel(Tournament.name)
     private readonly tournaments: Model<Tournament>,
+    @InjectModel(PlayerBlock.name) private readonly blocks: Model<PlayerBlock>,
+    @InjectModel(RemovedEnrollment.name) private readonly removed: Model<RemovedEnrollment>,
     private readonly membershipsService: MembershipsService,
     private readonly ownership: OwnershipService,
     private readonly tournamentAccess: TournamentAccessService,
@@ -213,6 +217,9 @@ export class PlayersService {
       throw new ConflictException('El jugador está en la plantilla de un equipo y no puede eliminarse');
     }
     await this.memberships.deleteMany({ playerId });
+    // 3E: sin la ficha no quedan bloqueos ni copias de participaciones apuntando a ella.
+    await this.blocks.deleteMany({ playerId });
+    await this.removed.updateMany({ 'memberships.playerId': playerId }, { $pull: { memberships: { playerId } } });
     await this.rosters.deleteMany({ playerId });
     await this.players.deleteOne({ _id: playerId });
     await this.cloudinary.destroy(current.photoPublicId);

@@ -5,6 +5,8 @@ import { PlayersController } from './players.controller.js';
 import { PlayersService } from './players.service.js';
 import { MembershipsService } from './memberships.service.js';
 import { PlayerDuplicatesService } from './player-duplicates.service.js';
+import { PlayerBlocksService } from './player-blocks.service.js';
+import { RosterHistoryService } from './roster-history.service.js';
 
 @Module({
   imports: [
@@ -14,12 +16,19 @@ import { PlayerDuplicatesService } from './player-duplicates.service.js';
       Models.team,
       Models.playerMatchStats,
       Models.tournament,
-      Models.tournamentTeam,
       Models.teamRoster,
+      Models.match,
+      Models.matchSheet,
+      Models.sanction,
+      Models.playerBlock,
+      Models.removedEnrollment,
+      Models.tournamentTeam,
+      Models.matchLog,
+      Models.user,
     ]),
   ],
   controllers: [PlayersController],
-  providers: [PlayersService, MembershipsService, PlayerDuplicatesService],
+  providers: [PlayersService, MembershipsService, PlayerDuplicatesService, PlayerBlocksService, RosterHistoryService],
   exports: [MembershipsService, PlayerDuplicatesService],
 })
 export class PlayersModule {}

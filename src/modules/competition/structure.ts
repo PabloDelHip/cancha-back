@@ -22,6 +22,11 @@ export interface StructureInput {
   matches: StagedMatch[];
   /** Equipos inscritos (filas de la liga). */
   teamIds: string[];
+  /**
+   * 3D: equipos retirados. Siguen en las tablas (sus resultados cuentan) pero no clasifican ni son
+   * campeones de liga: pasa el siguiente elegible. Opcional: sin él, nadie está retirado.
+   */
+  withdrawnTeamIds?: string[];
   nameOf: (teamId: string) => string;
 }
 
@@ -67,11 +72,23 @@ export interface StructureView {
   championTeamId: string | null;
 }
 
+/**
+ * 3D — filas que pueden clasificar: sin los retirados, renumeradas (el siguiente ocupa su lugar). Un
+ * retirado que ya figura en la siembra de la fase siguiente (clasificó antes de retirarse) se
+ * conserva: la clasificación ya decidida no se reescribe.
+ */
+export function eligibleRows(rows: StandingRow[], withdrawn: string[], keep: string[] = []): StandingRow[] {
+  const out = new Set(withdrawn.filter((id) => !keep.includes(id)));
+  if (!out.size) return rows;
+  return rows.filter((r) => !out.has(r.teamId)).map((r, i) => ({ ...r, position: i + 1 }));
+}
+
 function qualify(rows: StandingRow[], count: number, complete: boolean, decisions: TiebreakDecision[], scope: string): Qualification {
   const ranked = rankTable(rows, count, decisions, scope);
   return {
     count,
-    teamIds: complete && !ranked.unresolved.length ? ranked.rows.slice(0, count).map((r) => r.teamId) : null,
+    // Con retirados pueden quedar menos equipos elegibles que plazas: entonces no hay clasificados.
+    teamIds: complete && !ranked.unresolved.length && ranked.rows.length >= count ? ranked.rows.slice(0, count).map((r) => r.teamId) : null,
     unresolved: ranked.unresolved,
   };
 }
@@ -103,37 +120,46 @@ export function buildStructure(input: StructureInput): StructureView {
     const matches = phaseMatches(input.matches, 0);
     const table = leagueTable(input.teamIds, matches, input.nameOf, input.points);
     const complete = roundRobinComplete(matches);
-    const top = rankTable(table, 1);
+    const top = rankTable(eligibleRows(table, input.withdrawnTeamIds ?? []), 1);
     phases.push({ index: 0, type: PhaseType.LEAGUE, generated: matches.length > 0, complete, pending: pendingOf(matches), table, qualification: null });
     return {
       system: input.system,
       phases,
       next: null,
       // Líder verificable: liga completa y primer lugar sin empate deportivo.
-      championTeamId: complete && table.length && !top.unresolved.length ? table[0].teamId : null,
+      championTeamId: complete && top.rows.length && !top.unresolved.length ? top.rows[0].teamId : null,
     };
   }
 
   let seedsForNext: KnockoutSeed[] | null = null;
   let blockers: string[] = [];
+  const withdrawn = input.withdrawnTeamIds ?? [];
   for (let i = 0; i < plan.length; i++) {
     const stored = input.phases.find((p) => p.index === i);
     const type = plan[i];
+    const seeded = (input.phases.find((p) => p.index === i + 1)?.seeds ?? []).map((x) => x.teamId);
     const matches = phaseMatches(input.matches, i);
     if (type === PhaseType.LEAGUE) {
       const table = leagueTable(input.teamIds, matches, input.nameOf, input.points);
       const complete = !!stored && roundRobinComplete(matches);
       const count = input.playoffTeams ?? 0;
-      const qualification = qualify(table, count, complete, stored?.tiebreaks ?? [], 'LEAGUE');
+      const qualification = qualify(eligibleRows(table, withdrawn, seeded), count, complete, stored?.tiebreaks ?? [], 'LEAGUE');
       phases.push({ index: i, type, generated: !!stored, complete, pending: pendingOf(matches), table, qualification });
       seedsForNext = qualification.teamIds?.map((teamId, k) => ({ seed: k + 1, teamId, origin: `${k + 1}º fase regular` })) ?? null;
-      blockers = !stored ? ['La fase regular aún no se genera'] : !complete ? [`Faltan ${pendingOf(matches)} partidos de la fase regular`] : unresolvedMsg(qualification.unresolved, 'la tabla');
+      const eligible = eligibleRows(table, withdrawn, seeded).length;
+      blockers = !stored
+        ? ['La fase regular aún no se genera']
+        : !complete
+          ? [`Faltan ${pendingOf(matches)} partidos de la fase regular`]
+          : eligible < count
+            ? [shortMsg(eligible, count, 'la tabla')]
+            : unresolvedMsg(qualification.unresolved, 'la tabla');
     } else if (type === PhaseType.GROUPS) {
       const complete = !!stored && roundRobinComplete(matches);
       const q = input.qualifiersPerGroup ?? 0;
       const groups = (stored?.groups ?? []).map((g) => {
         const table = leagueTable(g.teamIds, groupMatches(input.matches, i, g.key), input.nameOf, input.points);
-        return { key: g.key, teamIds: g.teamIds, table, qualification: qualify(table, q, complete, stored?.tiebreaks ?? [], g.key) };
+        return { key: g.key, teamIds: g.teamIds, table, qualification: qualify(eligibleRows(table, withdrawn, seeded), q, complete, stored?.tiebreaks ?? [], g.key) };
       });
       phases.push({ index: i, type, generated: !!stored, complete, pending: pendingOf(matches), groups });
       // Cabezas de serie: primero todos los 1º (A, B, C…), luego todos los 2º… → con el orden estándar
@@ -146,7 +172,10 @@ export function buildStructure(input: StructureInput): StructureView {
         ? ['La fase de grupos aún no se genera']
         : !complete
           ? [`Faltan ${pendingOf(matches)} partidos de la fase de grupos`]
-          : groups.flatMap((g) => unresolvedMsg(g.qualification.unresolved, `el grupo ${g.key}`));
+          : groups.flatMap((g) => {
+              const eligible = eligibleRows(g.table, withdrawn, seeded).length;
+              return eligible < q ? [shortMsg(eligible, q, `el grupo ${g.key}`)] : unresolvedMsg(g.qualification.unresolved, `el grupo ${g.key}`);
+            });
     } else {
       if (!stored) {
         phases.push({ index: i, type, generated: false, manual: false, reseed: false, complete: false, legs: 1, seeds: seedsForNext ?? [], rounds: [], championTeamId: null });
@@ -174,6 +203,10 @@ export function buildStructure(input: StructureInput): StructureView {
     next: null,
     championTeamId: last?.type === PhaseType.KNOCKOUT ? last.championTeamId : null,
   };
+}
+
+function shortMsg(eligible: number, count: number, where: string) {
+  return `En ${where} quedan ${eligible} equipos elegibles (sin los retirados) para ${count} plazas de clasificación: arma la eliminatoria a mano`;
 }
 
 function unresolvedMsg(list: Qualification['unresolved'], where: string) {

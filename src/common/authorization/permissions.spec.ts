@@ -48,4 +48,12 @@ describe('matriz de permisos (RBAC)', () => {
     for (const r of ['OWNER', TournamentRole.ADMIN, TournamentRole.COORDINATOR, TournamentRole.SCORER] as const) expect(can(r, Permission.EVIDENCE_UPLOAD)).toBe(true);
     expect(can(TournamentRole.COORDINATOR, Permission.RESULTS)).toBe(false);
   });
+
+  it('3A: excepciones de inscripción solo OWNER/ADMIN (los mismos que inscriben: TEAMS)', () => {
+    for (const r of ['OWNER', TournamentRole.ADMIN] as const) expect(can(r, Permission.REGISTRATION_EXCEPTIONS)).toBe(true);
+    for (const r of [TournamentRole.COORDINATOR, TournamentRole.SCORER]) {
+      expect(can(r, Permission.REGISTRATION_EXCEPTIONS)).toBe(false);
+      expect(can(r, Permission.TEAMS)).toBe(false);
+    }
+  });
 });

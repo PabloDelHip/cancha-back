@@ -27,6 +27,7 @@ import { EvidenceService } from './evidence.service.js';
       Models.membership,
       Models.user,
       Models.matchIncident,
+      Models.playerBlock,
     ]),
   ],
   controllers: [MatchSheetController],

@@ -284,3 +284,37 @@ describe('desempates configurables', () => {
   });
 });
 
+
+describe('3D: equipos retirados', () => {
+  const l = { phase: 0, group: null, tie: null };
+  const base = { points: { win: 3, draw: 1, loss: 0 }, qualifiersPerGroup: null, knockoutTiebreak: KnockoutTiebreak.PENALTIES, finalTiebreak: null, nameOf: (id: string) => id };
+  // a > b > c > d en la tabla.
+  const league = () => [M('a', 'b', 3, 0, l), M('a', 'c', 3, 0, l), M('a', 'd', 3, 0, l), M('b', 'c', 1, 0, l), M('b', 'd', 1, 0, l), M('c', 'd', 1, 0, l)];
+
+  it('liga + playoffs: el retirado sigue en la tabla pero no clasifica; entra el siguiente', () => {
+    const view = buildStructure({ ...base, system: CompetitionSystem.LEAGUE_PLAYOFFS, playoffTeams: 2, phases: [{ index: 0, type: PhaseType.LEAGUE, legs: 1 }], matches: league(), teamIds: ['a', 'b', 'c', 'd'], withdrawnTeamIds: ['a'] });
+    const phase = view.phases[0];
+    expect(phase.type === PhaseType.LEAGUE && phase.table.map((r) => r.teamId)).toEqual(['a', 'b', 'c', 'd']);
+    expect(phase.type === PhaseType.LEAGUE && phase.qualification?.teamIds).toEqual(['b', 'c']);
+    expect(view.next).toMatchObject({ ready: true, seeds: [{ teamId: 'b', origin: '1º fase regular' }, { teamId: 'c', origin: '2º fase regular' }] });
+  });
+
+  it('ya sembrado en la fase siguiente (clasificó antes de retirarse): la clasificación no se reescribe', () => {
+    const ko = planKnockout(1, ['a', 'b'].map((teamId, i) => ({ seed: i + 1, teamId, origin: '' })), 1, schedule, 7).phase!;
+    const view = buildStructure({ ...base, system: CompetitionSystem.LEAGUE_PLAYOFFS, playoffTeams: 2, phases: [{ index: 0, type: PhaseType.LEAGUE, legs: 1 }, ko], matches: league(), teamIds: ['a', 'b', 'c', 'd'], withdrawnTeamIds: ['a'] });
+    const phase = view.phases[0];
+    expect(phase.type === PhaseType.LEAGUE && phase.qualification?.teamIds).toEqual(['a', 'b']);
+  });
+
+  it('menos elegibles que plazas: no hay clasificados y se explica', () => {
+    const view = buildStructure({ ...base, system: CompetitionSystem.LEAGUE_PLAYOFFS, playoffTeams: 4, phases: [{ index: 0, type: PhaseType.LEAGUE, legs: 1 }], matches: league(), teamIds: ['a', 'b', 'c', 'd'], withdrawnTeamIds: ['d'] });
+    expect(view.next).toMatchObject({ ready: false, seeds: null });
+    expect(view.next!.blockers[0]).toMatch(/3 equipos elegibles .* 4 plazas/);
+  });
+
+  it('liga clásica: el líder retirado no es campeón; lo es el siguiente', () => {
+    const input = { ...base, system: CompetitionSystem.LEAGUE, playoffTeams: null, phases: [], matches: league(), teamIds: ['a', 'b', 'c', 'd'] };
+    expect(buildStructure(input).championTeamId).toBe('a');
+    expect(buildStructure({ ...input, withdrawnTeamIds: ['a'] }).championTeamId).toBe('b');
+  });
+});

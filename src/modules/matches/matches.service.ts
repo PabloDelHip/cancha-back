@@ -22,6 +22,10 @@ import { MatchLogService } from '../match-log/match-log.service.js';
 import { MatchIncidentsService } from '../match-incidents/match-incidents.service.js';
 import { reserves } from '../venues/occupancy.js';
 import { belongsOn } from '../players/membership-rules.js';
+import { enforceSameDate, participantKey, registeredIn, sameDateConflicts, sameDatePairs } from '../players/same-date.js';
+import { assertNotBlocked, blockedAmong } from '../players/blocks.js';
+import { PlayerBlock } from '../players/schemas/player-block.schema.js';
+import { assertNotWithdrawn } from '../tournaments/withdrawal.js';
 import { MatchSheet } from '../match-sheet/schemas/match-sheet.schema.js';
 import { participationMismatch, participationOf } from '../match-sheet/lineup.js';
 import { assertSheetOpen, DECISION, publicMatch, sameRelease, type Released } from './match-rules.js';
@@ -55,6 +59,7 @@ export class MatchesService {
     private readonly memberships: Model<TeamMembership>,
     @InjectModel(Round.name) private readonly rounds: Model<Round>,
     @InjectModel(MatchSheet.name) private readonly sheets: Model<MatchSheet>,
+    @InjectModel(PlayerBlock.name) private readonly blocks: Model<PlayerBlock>,
     private readonly ownership: OwnershipService,
     private readonly competition: CompetitionService,
     private readonly discipline: DisciplineService,
@@ -216,6 +221,10 @@ export class MatchesService {
         throw new ConflictException('El partido está suspendido: primero decide qué pasa con él (reanudar, reprogramar, posponer o cancelar)');
       }
       await this.assertStatusChange(current, dto.status, session);
+      // 3D: un partido cancelado de un equipo retirado no se reactiva (primero se reincorpora el equipo).
+      if (current.status === MatchStatus.CANCELLED && status !== MatchStatus.CANCELLED) {
+        await assertNotWithdrawn(this.enrollments, session, current.tournamentId, [current.homeTeamId.toHexString(), current.awayTeamId.toHexString()]);
+      }
       // Con el torneo en curso, reprogramar, posponer, cancelar o decidir sobre una suspensión exige
       // un motivo (queda en el historial).
       const reason = dto.reason?.trim() || null;
@@ -239,6 +248,9 @@ export class MatchesService {
       if (round !== current.round || moving) {
         await this.ensureRound(tournamentId, round, session);
       }
+      // 3B: con participaciones registradas, la nueva fecha o jornada no puede crear irregularidades.
+      const placementChanged = reschedules || round !== current.round;
+      const incidentsBefore = placementChanged && status !== MatchStatus.CANCELLED ? await this.assertPlacementKeepsEligibility(current, { date: dto.date ?? current.date, round }, session) : null;
 
       // Cancha: se valida si queda asignada (nueva, o con fecha/hora/estado/torneo distintos).
       let nextField = dto.fieldId === undefined ? current.fieldId : dto.fieldId ? toObjectId(dto.fieldId) : null;
@@ -306,6 +318,7 @@ export class MatchesService {
       const updated = await this.matches
         .findByIdAndUpdate(id, update, { new: true, runValidators: true, session })
         .lean();
+      if (incidentsBefore) await this.discipline.checkMove(current, incidentsBefore, session, user);
       const decision = deciding ? DECISION[status as keyof typeof DECISION] : null;
       if (decision) await this.incidents.resolveSuspension(session, current, decision, reason, user.id);
       await this.log.edited(session, { userId: user.id }, current, updated!, reason, {
@@ -424,6 +437,18 @@ export class MatchesService {
       }
       await this.validateStats(match, dto, session);
       await this.assertLineupConsistent(match._id, dto.playerStats, session);
+      // 3A: nadie juega con dos equipos del torneo en la misma fecha deportiva (salvo corrección auditada).
+      const sameDate = await sameDateConflicts(
+        { matches: this.matches, stats: this.stats, sheets: this.sheets },
+        session,
+        match,
+        dto.playerStats.filter((s) => s.played !== false).map((s) => ({ playerId: s.playerId, teamId: s.teamId })),
+      );
+      await enforceSameDate({ access: this.access, log: this.log }, session, match, sameDate, user, dto.sameDateReason, async (ids) => [...(await this.playerNames(ids, session)).values()]);
+      // 3D: bloqueo administrativo en la fecha del partido → 409 (quien ya figuraba en él no se revalida).
+      const already = await registeredIn({ stats: this.stats, sheets: this.sheets }, session, match._id);
+      const joining = dto.playerStats.filter((s) => s.played !== false && !already.has(participantKey(s.playerId, s.teamId))).map((s) => s.playerId);
+      await assertNotBlocked(this.blocks, session, match.tournamentId, [...new Set(joining)], match.date, async (ids) => [...(await this.playerNames(ids, session)).values()]);
       const extras = {
         homeScore: dto.homeScore,
         awayScore: dto.awayScore,
@@ -588,6 +613,55 @@ export class MatchesService {
     }
   }
 
+  /**
+   * 3B — cambiar la fecha o la jornada de un partido con participaciones registradas (estadísticas
+   * jugadas o alineación de la ficha): se recalcula su elegibilidad en la nueva fecha deportiva.
+   * Solo cuenta lo que el cambio CREA: alguien que deja de estar inscrito con su equipo en la fecha,
+   * o un conflicto de misma fecha (día o jornada) que antes no existía. Lo ya autorizado o
+   * anterior no bloquea. Devuelve las incidencias disciplinarias de antes, para compararlas tras
+   * escribir (`DisciplineService.checkMove`); null si no hay participaciones.
+   */
+  private async assertPlacementKeepsEligibility(current: Match & { _id: Types.ObjectId }, next: { date: string; round: number }, session: ClientSession) {
+    const registered = [...(await registeredIn({ stats: this.stats, sheets: this.sheets }, session, current._id))].map((k) => {
+      const [playerId, teamId] = k.split(':');
+      return { playerId, teamId };
+    });
+    if (!registered.length) return null;
+    const problems: { playerId: string; teamId: string; cause: 'NOT_REGISTERED_ON_DATE' | 'SAME_DATE_OTHER_TEAM' | 'BLOCKED'; matchId: string | null }[] = [];
+
+    if (next.date !== current.date) {
+      const memberships = await this.memberships.find({ tournamentId: current.tournamentId, playerId: { $in: registered.map((p) => toObjectId(p.playerId)) } }).session(session).lean();
+      const belongs = (p: { playerId: string; teamId: string }, date: string) => memberships.some((m) => sameId(m.playerId, p.playerId) && sameId(m.teamId, p.teamId) && belongsOn(m, date));
+      for (const p of registered) if (belongs(p, current.date) && !belongs(p, next.date)) problems.push({ ...p, cause: 'NOT_REGISTERED_ON_DATE', matchId: null });
+      // 3D: un bloqueo administrativo que cubre la nueva fecha y no la anterior.
+      const ids = [...new Set(registered.map((p) => p.playerId))];
+      const was = await blockedAmong(this.blocks, session, current.tournamentId, ids, current.date);
+      const will = await blockedAmong(this.blocks, session, current.tournamentId, ids, next.date);
+      for (const p of registered) if (will.includes(p.playerId) && !was.includes(p.playerId)) problems.push({ ...p, cause: 'BLOCKED', matchId: null });
+    }
+    const models = { matches: this.matches, stats: this.stats, sheets: this.sheets };
+    const [before, after] = await Promise.all([
+      sameDatePairs(models, session, current, current, registered),
+      sameDatePairs(models, session, current, next, registered),
+    ]);
+    for (const c of after) {
+      if (before.some((b) => b.playerId === c.playerId && b.matchId === c.matchId)) continue;
+      const mine = registered.find((p) => p.playerId === c.playerId)!;
+      problems.push({ playerId: c.playerId, teamId: mine.teamId, cause: 'SAME_DATE_OTHER_TEAM', matchId: c.matchId });
+    }
+    if (problems.length) {
+      const names = await this.playerNames(problems.map((p) => p.playerId), session);
+      const why = { NOT_REGISTERED_ON_DATE: 'no está inscrito con su equipo en la nueva fecha', SAME_DATE_OTHER_TEAM: 'ya jugó con otro equipo en esa fecha deportiva', BLOCKED: 'tiene un bloqueo administrativo en la nueva fecha' };
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'RESCHEDULE_AFFECTS_ELIGIBILITY',
+        message: `El partido ya tiene participaciones registradas y el cambio las dejaría irregulares: ${problems.map((p) => `${names.get(p.playerId)} (${why[p.cause]})`).join(', ')}. Las alineaciones y estadísticas no se modifican.`,
+        players: problems.map((p) => ({ ...p, name: names.get(p.playerId) ?? null })),
+      });
+    }
+    return this.discipline.incidentKeys(current.tournamentId, session);
+  }
+
   private async playerNames(ids: string[], session: ClientSession) {
     const list = await this.players.find({ _id: { $in: ids.map(toObjectId) } }).select('firstName lastName').session(session).lean();
     const names = new Map(list.map((p) => [p._id.toHexString(), `${p.firstName} ${p.lastName}`]));
@@ -616,6 +690,8 @@ export class MatchesService {
       throw new BadRequestException(
         'Ambos equipos deben estar inscritos en el torneo',
       );
+    // 3D: a un equipo retirado no se le programan partidos nuevos.
+    await assertNotWithdrawn(this.enrollments, session, tournamentId, [homeTeamId, awayTeamId]);
   }
 
   /**

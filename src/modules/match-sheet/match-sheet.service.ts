@@ -16,6 +16,9 @@ import { TournamentAccessService } from '../../common/authorization/tournament-a
 import { Permission, permissionsOf } from '../../common/authorization/permissions.js';
 import { sameId, toObjectId } from '../../common/utils/serialize.js';
 import { belongsOn } from '../players/membership-rules.js';
+import { enforceSameDate, participantKey, registeredIn, sameDateConflicts } from '../players/same-date.js';
+import { assertNotBlocked } from '../players/blocks.js';
+import { PlayerBlock } from '../players/schemas/player-block.schema.js';
 import { assertSheetOpen } from '../matches/match-rules.js';
 import { DisciplineService } from '../discipline/discipline.service.js';
 import { RefereesService } from '../referees/referees.service.js';
@@ -54,6 +57,7 @@ export class MatchSheetService {
     @InjectModel(Player.name) private readonly players: Model<Player>,
     @InjectModel(TeamMembership.name) private readonly memberships: Model<TeamMembership>,
     @InjectModel(User.name) private readonly users: Model<User>,
+    @InjectModel(PlayerBlock.name) private readonly blocks: Model<PlayerBlock>,
     private readonly ownership: OwnershipService,
     private readonly access: TournamentAccessService,
     private readonly discipline: DisciplineService,
@@ -83,7 +87,7 @@ export class MatchSheetService {
     const playerIds = [...new Set([...statRows.map((s) => s.playerId.toHexString()), ...(sheet?.teams ?? []).flatMap((t) => t.players.map((p) => p.playerId.toHexString()))])];
     const [players, memberships, closer] = await Promise.all([
       this.players.find({ _id: { $in: playerIds.map(toObjectId) } }).select('firstName lastName nickname position photoUrl').lean(),
-      this.memberships.find({ tournamentId: match.tournamentId, playerId: { $in: playerIds.map(toObjectId) } }).select('playerId teamId jerseyNumber active startDate endDate').lean(),
+      this.memberships.find({ tournamentId: match.tournamentId, playerId: { $in: playerIds.map(toObjectId) } }).select('playerId teamId jerseyNumber active startDate endDate registeredAt').lean(),
       match.sheetClosed ? this.users.findById(match.sheetClosed.by).select('firstName lastName').lean() : null,
     ]);
     const playerById = new Map(players.map((p) => [p._id.toHexString(), p]));
@@ -221,8 +225,26 @@ export class MatchSheetService {
       const both = dto.players.filter((p) => rivalLineup?.players.some((x) => sameId(x.playerId, p.playerId)) || rivalStats.some((s) => sameId(s.playerId, p.playerId)));
       if (both.length) throw new BadRequestException(`Ya figuran con el rival en este partido: ${(await this.names(both.map((p) => p.playerId), session)).join(', ')}`);
 
+      // 3A: nadie juega con dos equipos del torneo en la misma fecha deportiva (salvo corrección auditada).
+      const sameDate = await sameDateConflicts(
+        { matches: this.matches, stats: this.stats, sheets: this.sheets },
+        session,
+        match,
+        [...participation.participants].map((playerId) => ({ playerId, teamId: team.toHexString() })),
+      );
+      await enforceSameDate({ access: this.access, log: this.log }, session, match, sameDate, user, dto.sameDateReason, (ids) => this.names(ids, session));
+
+      // 3D: bloqueo administrativo vigente en la fecha del partido → siempre 409. Quien ya figuraba en
+      // este partido con ese equipo no se revalida (lo registrado antes del bloqueo no cambia).
+      const already = await registeredIn({ stats: this.stats, sheets: this.sheets }, session, match._id);
+      await assertNotBlocked(this.blocks, session, match.tournamentId, [...participation.participants].filter((id) => !already.has(participantKey(id, team))), match.date, (ids) => this.names(ids, session));
+
       // Elegibilidad: suspendidos que participan (el reglamento decide si se bloquea o solo se avisa).
-      const suspended = await this.discipline.suspendedAmong(match, [...participation.participants], session);
+      // 3B: al corregir un partido ya jugado, quien ya figuraba en él no se revalida (como la
+      // captura): una sanción derivada después no traba la historia. Uno por jugar sí se revalida.
+      const registered = match.status === MatchStatus.FINISHED ? await registeredIn({ stats: this.stats, sheets: this.sheets }, session, match._id) : new Set<string>();
+      const joining = [...participation.participants].filter((id) => !registered.has(participantKey(id, team)));
+      const suspended = await this.discipline.suspendedAmong(match, joining, session);
       if (suspended.playerIds.length) {
         const names = await this.names(suspended.playerIds, session);
         if (suspended.block) throw new ConflictException(`Jugadores suspendidos para este partido: ${names.join(', ')}. Déjalos como suplentes sin ingresar o revisa su sanción en Disciplina.`);

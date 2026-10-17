@@ -236,7 +236,7 @@ describe('Prueba de dominio: Juan en 3 equipos, torneos y plantilla global indep
 
   it('el organizador retira a Juan de Liga Municipal: solo cambia esa participación, nunca la plantilla global', async () => {
     const globalBefore = await rosters.find({ playerId: oid(juan) }).lean();
-    await as(L).delete(`/api/tournaments/${liga}/players/${juan}`).expect(204);
+    await as(L).delete(`/api/tournaments/${liga}/players/${juan}`).send({ reason: 'Baja de prueba' }).expect(204);
     expect(await rosters.find({ playerId: oid(juan) }).lean()).toEqual(globalBefore);
     const ms = (await api().get(`/api/players/${juan}/memberships`).expect(200)).body as { tournamentId: string; teamId: string; active: boolean }[];
     const state = (t: string) => ms.find((m) => m.tournamentId === t)!.active;

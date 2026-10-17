@@ -67,6 +67,8 @@ export type TPTournament = TournamentRef & {
   qualifiersPerGroup?: number | null;
   knockoutTiebreak?: KnockoutTiebreak;
   finalTiebreak?: KnockoutTiebreak | null;
+  /** 3D: equipos retirados (no clasifican ni son campeones de liga). */
+  withdrawnTeamIds?: string[];
 };
 
 export interface TeamProfileInput {
@@ -169,6 +171,7 @@ export function buildTeamProfile(input: TeamProfileInput) {
         phases: t.phases ?? [],
         matches: all,
         teamIds: input.tournamentTeams.get(t.id) ?? [],
+        withdrawnTeamIds: t.withdrawnTeamIds ?? [],
         nameOf,
       });
       // Posición en la tabla de su fase: liga regular, o su propio grupo.

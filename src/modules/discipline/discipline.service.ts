@@ -445,6 +445,44 @@ export class DisciplineService {
     return { block: rules.eligibility === EligibilityMode.BLOCK, playerIds: playerIds.filter((id) => suspended.has(id)) };
   }
 
+  /** "Jugó estando suspendido" vigentes del torneo (`partido|jugador`), para comparar antes y después de un cambio. */
+  async incidentKeys(tournamentId: Types.ObjectId, session: ClientSession) {
+    const { result } = await this.compute(tournamentId, session);
+    return new Set(result.incidents.map((i) => `${i.matchId}|${i.playerId}`));
+  }
+
+  /**
+   * 3B — tras cambiar la fecha o jornada de un partido con participaciones (dentro de la misma
+   * transacción, ya escrito): las incidencias que el cambio CREA (no las que ya existían). BLOCK →
+   * 409 y la transacción se revierte; WARN → se registran, como al capturar.
+   */
+  async checkMove(match: { _id: Types.ObjectId; tournamentId: Types.ObjectId }, before: Set<string>, session: ClientSession, user: AuthUser) {
+    const { rules, result } = await this.compute(match.tournamentId, session);
+    const created = result.incidents.filter((i) => !before.has(`${i.matchId}|${i.playerId}`));
+    if (!created.length) return;
+    if (rules.eligibility === EligibilityMode.BLOCK) {
+      const players = await this.players.find({ _id: { $in: created.map((i) => toObjectId(i.playerId)) } }).select('firstName lastName').session(session).lean();
+      const name = new Map(players.map((p) => [p._id.toHexString(), `${p.firstName} ${p.lastName}`]));
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'RESCHEDULE_AFFECTS_ELIGIBILITY',
+        message: `El cambio dejaría jugadores participando estando suspendidos: ${[...new Set(created.map((i) => name.get(i.playerId)))].join(', ')}. Revisa su sanción en Disciplina o elige otra fecha.`,
+        players: created.map((i) => ({ playerId: i.playerId, name: name.get(i.playerId) ?? null, teamId: i.teamId, cause: 'SUSPENDED', matchId: i.matchId })),
+      });
+    }
+    for (const i of created) {
+      await this.record(session, {
+        tournamentId: match.tournamentId,
+        action: DisciplineAction.PLAYED_WHILE_SUSPENDED,
+        ref: i.ref,
+        playerId: toObjectId(i.playerId),
+        matchId: toObjectId(i.matchId),
+        userId: user.id,
+        justification: null,
+      });
+    }
+  }
+
   /** Tras un cambio de equipo, la sanción manual puede aplicar desde un partido del equipo nuevo. */
   private async playsFor(tournamentId: Types.ObjectId, playerId: Types.ObjectId, match: { homeTeamId: Types.ObjectId; awayTeamId: Types.ObjectId }, session: ClientSession) {
     return !!(await this.memberships

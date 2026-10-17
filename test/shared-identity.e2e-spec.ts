@@ -119,7 +119,7 @@ describe('Player global', () => {
   });
 
   it('B NO puede cerrar ni cambiar la participación de Juan en el torneo de A', async () => {
-    await as(B).delete(`/api/tournaments/${ids.ligaA}/players/${ids.juan}`).expect(403);
+    await as(B).delete(`/api/tournaments/${ids.ligaA}/players/${ids.juan}`).send({ reason: 'Baja de prueba' }).expect(403);
     await register(B, ids.ligaA, ids.juan, ids.tigres, 99).expect(403);
     // Y A no puede borrar la ficha: Juan ya participa en un torneo de B.
     await as(A).delete(`/api/players/${ids.juan}`).expect(409);

@@ -65,6 +65,9 @@ export class StatisticsService {
         tournamentId: toObjectId(tournamentId),
       })
     ).map(String);
+    const withdrawn = new Set(
+      (await this.enrollments.find({ tournamentId: toObjectId(tournamentId), withdrawnAt: { $ne: null } }).select('teamId').lean()).map((e) => e.teamId.toHexString()),
+    );
     const [all, teams] = await Promise.all([
       this.finishedMatches({ tournamentId: toObjectId(tournamentId) }),
       this.teamsById(teamIds),
@@ -78,6 +81,8 @@ export class StatisticsService {
     ).map((row) => ({
       ...row,
       team: teams.get(row.teamId) ?? null,
+      // 3D: retirado (sus resultados cuentan; no clasifica).
+      withdrawn: withdrawn.has(row.teamId),
     }));
   }
 

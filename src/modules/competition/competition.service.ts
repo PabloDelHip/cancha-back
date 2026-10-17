@@ -66,6 +66,7 @@ export function structureInput(
   matches: StagedMatch[],
   teamIds: string[],
   nameOf: (id: string) => string,
+  withdrawnTeamIds: string[] = [],
 ): StructureInput {
   const s = { ...DEFAULT_SETTINGS, ...t.settings };
   return {
@@ -78,6 +79,7 @@ export function structureInput(
     phases: t.phases ?? [],
     matches,
     teamIds,
+    withdrawnTeamIds,
     nameOf,
   };
 }
@@ -107,7 +109,7 @@ export class CompetitionService {
     const [tournament, rows, enrolled] = await Promise.all([
       this.tournaments.findById(tid).select('name status settings phases dataCoverage').session(session).lean(),
       this.matches.find({ tournamentId: tid }).select(STAGED_MATCH_FIELDS).session(session).lean<LeanStagedMatch[]>(),
-      this.enrollments.find({ tournamentId: tid }).select('teamId').session(session).lean(),
+      this.enrollments.find({ tournamentId: tid }).select('teamId withdrawnAt').session(session).lean(),
     ]);
     if (!tournament) throw new NotFoundException(`Torneo ${tournamentId} no encontrado`);
     const matches = rows.map(toStaged);
@@ -119,7 +121,8 @@ export class CompetitionService {
       .session(session)
       .lean();
     const teamMap = new Map(teams.map((t) => [t._id.toHexString(), teamRef(t)]));
-    const input = structureInput(tournament, matches, teamIds, (id) => teamMap.get(id)?.name ?? '');
+    const withdrawn = enrolled.filter((e) => e.withdrawnAt).map((e) => e.teamId.toHexString());
+    const input = structureInput(tournament, matches, teamIds, (id) => teamMap.get(id)?.name ?? '', withdrawn);
     return { tournament, matches, teamMap, input };
   }
 
@@ -146,6 +149,8 @@ export class CompetitionService {
       ...view,
       tiebreaks: (tournament.phases ?? []).flatMap((p) => (p.tiebreaks ?? []).map((t) => ({ phase: p.index, ...t }))),
       teams: Object.fromEntries(teamMap),
+      // 3D: siguen en las tablas, pero no clasifican.
+      withdrawnTeamIds: input.withdrawnTeamIds ?? [],
     };
   }
 
@@ -253,6 +258,9 @@ export class CompetitionService {
       if (dto.homeTeamId === dto.awayTeamId) throw new BadRequestException('Un equipo no puede enfrentarse a sí mismo');
       for (const t of [dto.homeTeamId, dto.awayTeamId]) {
         if (!input.teamIds.includes(t)) throw new BadRequestException('Los dos equipos deben estar inscritos en el torneo');
+        if (input.withdrawnTeamIds?.includes(t)) {
+          throw new ConflictException({ statusCode: 409, error: 'TEAM_WITHDRAWN', message: 'Un equipo retirado del torneo no entra en el cuadro', teamIds: [t] });
+        }
       }
       const inRound = (phase.bracket ?? []).filter((t) => t.round === dto.round);
       const capacity = bracketSize(phase) / 2 ** (dto.round + 1);
@@ -493,6 +501,28 @@ export class CompetitionService {
     if (next.status !== MatchStatus.FINISHED) throw new BadRequestException('Los penales solo se capturan con el partido finalizado');
     if (next.homeScore !== next.awayScore) throw new BadRequestException('Solo hay penales si el partido termina empatado');
     if (next.penalties.home === next.penalties.away) throw new BadRequestException('La tanda de penales no puede terminar empatada');
+  }
+
+  /**
+   * 3D — el equipo sigue vivo en una eliminatoria generada y sin terminar: figura en un cruce y no
+   * perdió ninguno. Retirarlo dejaría la llave sin resolver (no se cancela ni hay incomparecencia).
+   */
+  async knockoutAlive(tournamentId: Types.ObjectId, teamId: string, session: ClientSession) {
+    const { input } = await this.context(tournamentId, session);
+    return buildStructure(input).phases.some((p) => {
+      if (p.type !== PhaseType.KNOCKOUT || !p.generated || p.complete) return false;
+      const ties = p.rounds.flatMap((r) => r.ties).filter((t) => t.homeTeamId === teamId || t.awayTeamId === teamId);
+      return ties.length > 0 && !ties.some((t) => t.winnerTeamId !== null && t.winnerTeamId !== teamId);
+    });
+  }
+
+  /**
+   * 3D — reincorporar a un retirado: si ya se generó automáticamente una eliminatoria desde una tabla
+   * sin él, devolverlo cambiaría una clasificación ya usada. Devuelve esas fases (vacío = se puede).
+   */
+  async phasesAdvancedWithout(tournamentId: Types.ObjectId, teamId: string, session: ClientSession) {
+    const t = await this.tournaments.findById(tournamentId).select('phases').session(session).lean();
+    return (t?.phases ?? []).filter((p) => p.type === PhaseType.KNOCKOUT && p.index > 0 && !p.manual && !(p.seeds ?? []).some((x) => x.teamId === teamId)).map((p) => p.index);
   }
 
   /** Los formatos con eliminatoria requieren un campeón antes de finalizar. */

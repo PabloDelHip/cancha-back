@@ -7,6 +7,7 @@ import {
   TournamentTeam,
   TournamentTeamSchema,
 } from '../modules/tournaments/schemas/tournament-team.schema.js';
+import { RemovedEnrollment, RemovedEnrollmentSchema } from '../modules/tournaments/schemas/removed-enrollment.schema.js';
 import { Team, TeamSchema } from '../modules/teams/schemas/team.schema.js';
 import {
   Player,
@@ -38,6 +39,7 @@ import { MatchEvidence, MatchEvidenceSchema } from '../modules/match-sheet/schem
 import { Referee, RefereeSchema } from '../modules/referees/schemas/referee.schema.js';
 import { Venue, VenueSchema } from '../modules/venues/schemas/venue.schema.js';
 import { Sanction, SanctionSchema } from '../modules/discipline/schemas/sanction.schema.js';
+import { PlayerBlock, PlayerBlockSchema } from '../modules/players/schemas/player-block.schema.js';
 import { DisciplineLog, DisciplineLogSchema } from '../modules/discipline/schemas/discipline-log.schema.js';
 import {
   AuthSession,
@@ -71,6 +73,8 @@ export const Models = {
   authSession: { name: AuthSession.name, schema: AuthSessionSchema },
   sanction: { name: Sanction.name, schema: SanctionSchema },
   disciplineLog: { name: DisciplineLog.name, schema: DisciplineLogSchema },
+  playerBlock: { name: PlayerBlock.name, schema: PlayerBlockSchema },
+  removedEnrollment: { name: RemovedEnrollment.name, schema: RemovedEnrollmentSchema },
   venue: { name: Venue.name, schema: VenueSchema },
   referee: { name: Referee.name, schema: RefereeSchema },
   matchLog: { name: MatchLog.name, schema: MatchLogSchema },

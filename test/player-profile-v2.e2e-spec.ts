@@ -160,7 +160,7 @@ describe('Player Profile V2 · carrera', () => {
     const p = await newPlayer();
     const t1 = await tournament({ system: 'LEAGUE' }, '2026-10-01');
     const [a1, a2] = await teams(t1, 2);
-    await as().put(`/api/tournaments/${t1}/players/${p}`).send({ teamId: a1, jerseyNumber: 9, startDate: '2026-10-01' }).expect(200);
+    await as().put(`/api/tournaments/${t1}/players/${p}`).send({ teamId: a1, jerseyNumber: 9, startDate: '2026-11-01' }).expect(200);
     const m1 = (await as().post('/api/matches').send({ tournamentId: t1, round: 1, homeTeamId: a1, awayTeamId: a2, date: '2026-11-07', time: '18:00' }).expect(201)).body.id;
     await as().put(`/api/matches/${m1}/result`).send({ homeScore: 3, awayScore: 0, playerStats: [{ playerId: p, teamId: a1, played: true, goals: 3, assists: 0, yellowCards: 0, redCards: 0 }] }).expect(200);
 

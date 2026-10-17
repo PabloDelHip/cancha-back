@@ -422,7 +422,7 @@ describe('Flujo de aceptación', () => {
   it('14. cambio de equipo: el historial conserva el equipo con el que jugó', async () => {
     const history = await auth()
       .put(`/api/tournaments/${ids.tournament}/players/${ids.a}`)
-      .send({ teamId: ids.halcones, jerseyNumber: 7, startDate: '2027-02-01' })
+      .send({ teamId: ids.halcones, fromTeamId: ids.tigres, transferReason: 'Cambio de prueba', jerseyNumber: 7, startDate: '2027-02-01' })
       .expect(200);
     expect(history.body).toHaveLength(2);
     expect(history.body[0]).toMatchObject({

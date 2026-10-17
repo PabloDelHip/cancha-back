@@ -288,4 +288,15 @@ export class SaveResultDto {
   @ValidateNested({ each: true })
   @Type(() => PlayerStatInputDto)
   playerStats: PlayerStatInputDto[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    maxLength: 300,
+    description: 'Corrección administrativa (3A, permiso REGISTRATION_EXCEPTIONS): motivo para dejar que un jugador figure con dos equipos del torneo en la misma fecha deportiva. Queda en el historial del partido.',
+  })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(300)
+  sameDateReason?: string | null;
 }

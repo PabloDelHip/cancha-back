@@ -132,7 +132,7 @@ describe('alineaciones y sustituciones', () => {
   it('cambio de equipo: vale la plantilla vigente en la fecha del partido', async () => {
     const s = await setup(3);
     // h5 pasa al visitante desde el 2027-01-15: el partido del 7 lo juega con el local, el del 21 con el visitante.
-    await as(O).put(`/api/tournaments/${s.t}/players/${s.h[5]}`).send({ teamId: s.away, jerseyNumber: 30, startDate: '2027-01-15' }).expect(200);
+    await as(O).put(`/api/tournaments/${s.t}/players/${s.h[5]}`).send({ teamId: s.away, fromTeamId: s.home, transferReason: 'Cambio de prueba', jerseyNumber: 30, startDate: '2027-01-15' }).expect(200);
     await saveTeam(s, s.m[0], s.home, { players: [starter(s.h[5])], substitutions: [] }).expect(200);
     await saveTeam(s, s.m[2], s.home, { players: [starter(s.h[5])], substitutions: [] }).expect(400);
     const away = (await saveTeam(s, s.m[2], s.away, { players: [starter(s.h[5])], substitutions: [] }).expect(200)).body.teams[1];

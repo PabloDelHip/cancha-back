@@ -7,9 +7,12 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import type { ClientSession } from 'mongoose';
-import { CompetitionSystem, DataCoverage, KnockoutTiebreak, MatchLogCause, MatchStatus, TournamentStatus } from '../../common/enums/index.js';
+import { CompetitionSystem, DataCoverage, KnockoutTiebreak, MatchLogCause, MatchStatus, SuspensionDecision, TournamentStatus } from '../../common/enums/index.js';
 import { DEFAULT_REGISTRATION, DEFAULT_SETTINGS, Tournament, TournamentSettings, withCoverage } from './schemas/tournament.schema.js';
-import { TournamentTeam } from './schemas/tournament-team.schema.js';
+import { EnrollmentAuditAction, TournamentTeam } from './schemas/tournament-team.schema.js';
+import { MembershipAuditAction } from '../players/schemas/team-membership.schema.js';
+import { MatchIncidentsService } from '../match-incidents/match-incidents.service.js';
+import { todayISODate } from '../../common/utils/dates.js';
 import { Team } from '../teams/schemas/team.schema.js';
 import { Match } from '../matches/schemas/match.schema.js';
 import { TeamMembership } from '../players/schemas/team-membership.schema.js';
@@ -26,6 +29,8 @@ import { TournamentInvitation } from './schemas/tournament-invitation.schema.js'
 import { assertAssignmentsReleased, VenuesService } from '../venues/venues.service.js';
 import { DEFAULT_MATCH_MINUTES } from '../venues/occupancy.js';
 import { Round } from '../rounds/schemas/round.schema.js';
+import { PlayerBlock } from '../players/schemas/player-block.schema.js';
+import { RemovedEnrollment } from './schemas/removed-enrollment.schema.js';
 import {
   CreateTournamentDto,
   EnrollmentQueryDto,
@@ -73,6 +78,8 @@ export class TournamentsService {
     @InjectModel(MatchEvidence.name) private readonly matchEvidence: Model<MatchEvidence>,
     @InjectModel(TournamentMember.name) private readonly members: Model<TournamentMember>,
     @InjectModel(TournamentInvitation.name) private readonly invitations: Model<TournamentInvitation>,
+    @InjectModel(PlayerBlock.name) private readonly blocks: Model<PlayerBlock>,
+    @InjectModel(RemovedEnrollment.name) private readonly removed: Model<RemovedEnrollment>,
     private readonly ownership: OwnershipService,
     private readonly competition: CompetitionService,
     private readonly organizers: OrganizerAccessService,
@@ -82,6 +89,7 @@ export class TournamentsService {
     private readonly referees: RefereesService,
     private readonly log: MatchLogService,
     private readonly access: TournamentAccessService,
+    private readonly incidents: MatchIncidentsService,
   ) {}
 
   async findOwned(id: string, user: AuthUser) {
@@ -358,6 +366,9 @@ export class TournamentsService {
       await this.matchEvidence.deleteMany({ tournamentId }, { session });
       await this.members.deleteMany({ tournamentId }, { session });
       await this.invitations.deleteMany({ tournamentId }, { session });
+      // 3E: bloqueos administrativos y copias de equipos quitados (sin torneo no hay historial).
+      await this.blocks.deleteMany({ tournamentId }, { session });
+      await this.removed.deleteMany({ tournamentId }, { session });
       await this.tournaments.deleteOne({ _id: id }, { session });
       return before?.logoPublicId;
     });
@@ -374,8 +385,9 @@ export class TournamentsService {
       .populate<{ teamId: WithId<Team> }>('teamId')
       .lean();
     return rows
-      .map(({ teamId: team, ...rest }) => ({
+      .map(({ teamId: team, audit: _audit, ...rest }) => ({
         ...serialize(rest),
+        withdrawnAt: rest.withdrawnAt ?? null,
         teamId: serialize(team).id,
         team: serialize(team),
       }))
@@ -396,7 +408,7 @@ export class TournamentsService {
         .lean(),
       this.enrollments.countDocuments(filter),
     ]);
-    return paginated(serialize(items), total, query);
+    return paginated(serialize(items.map(({ audit: _audit, ...e }) => ({ ...e, withdrawnAt: e.withdrawnAt ?? null }))), total, query);
   }
 
   /**
@@ -427,7 +439,8 @@ export class TournamentsService {
     };
     // Con el cerrojo: no se retira un equipo mientras se le programa un partido.
     await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
-      if (!(await this.enrollments.exists(filter).session(session)))
+      const enrollment = await this.enrollments.findOne(filter).session(session).lean();
+      if (!enrollment)
         throw new NotFoundException('El equipo no está inscrito en este torneo');
       const hasMatches = await this.matches
         .exists({
@@ -439,12 +452,111 @@ export class TournamentsService {
         throw new ConflictException(
           'El equipo ya tiene partidos en este torneo y no puede darse de baja',
         );
-      // Sin partidos no hay historia: se retiran también sus participaciones en ESTE torneo y, si
-      // estaba en seguimiento (6G), deja de estarlo en la misma transacción (sin referencias huérfanas).
+      // Sin partidos no hay historia deportiva: se retiran también sus participaciones en ESTE torneo
+      // y, si estaba en seguimiento (6G), deja de estarlo en la misma transacción (sin referencias
+      // huérfanas). 3E: su historial administrativo (altas, bajas, excepciones) queda copiado en
+      // `removed_enrollments`, solo para el historial de plantillas.
+      const memberships = await this.memberships.find(filter).session(session).lean();
+      await this.removed.create(
+        [{ tournamentId: filter.tournamentId, teamId: filter.teamId, enrolledAt: enrollment.createdAt ?? null, removedBy: toObjectId(user.id), removedRole: await this.access.roleOf(filter.tournamentId, user.id, session), removedAt: new Date(), memberships: memberships as unknown as Record<string, unknown>[] }],
+        { session },
+      );
       await this.memberships.deleteMany(filter, { session });
       await this.enrollments.deleteOne(filter, { session });
       await this.tournaments.updateOne({ _id: filter.tournamentId }, { $pull: { trackedTeamIds: filter.teamId } }, { session });
     });
+  }
+
+  /**
+   * 3D — retira del torneo a un equipo que ya tiene partidos (sin partidos se usa removeTeam). Con
+   * motivo (permiso TEAMS) y el cerrojo del torneo, en una transacción:
+   * - Sus resultados, estadísticas, fichas y sanciones se conservan y siguen contando en la tabla.
+   * - Sus partidos pendientes de liga o grupos (programados, pospuestos, suspendidos) se cancelan con
+   *   el motivo en su historial, sin marcador ni puntos (no hay incomparecencia).
+   * - Las participaciones vigentes de sus jugadores se cierran hoy (historial intacto): moverlos a
+   *   otro equipo después es un cambio de equipo con las reglas de 3C.
+   * - Ya no admite jugadores ni partidos y no clasifica (ver structure.eligibleRows).
+   * No se retira con un partido en vivo, ni si sigue vivo en una eliminatoria: esa llave se resuelve
+   * antes capturando su resultado.
+   */
+  async withdrawTeam(tournamentId: string, teamId: string, reason: string, user: AuthUser) {
+    await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
+    const [tid, team] = [toObjectId(tournamentId), toObjectId(teamId)];
+    const note = `Equipo retirado del torneo: ${reason.trim()}`;
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
+      const enrollment = await this.enrollments.findOne({ tournamentId: tid, teamId: team }).session(session);
+      if (!enrollment) throw new NotFoundException('El equipo no está inscrito en este torneo');
+      if (enrollment.withdrawnAt) throw new ConflictException({ statusCode: 409, error: 'TEAM_ALREADY_WITHDRAWN', message: `El equipo ya se retiró el ${enrollment.withdrawnAt}` });
+      const matches = await this.matches.find({ tournamentId: tid, $or: [{ homeTeamId: team }, { awayTeamId: team }] }).session(session).lean();
+      if (!matches.length) {
+        throw new ConflictException({ statusCode: 409, error: 'TEAM_HAS_NO_MATCHES', message: 'El equipo no tiene partidos en este torneo: quítalo del torneo en lugar de retirarlo' });
+      }
+      if (matches.some((m) => m.status === MatchStatus.LIVE)) {
+        throw new ConflictException({ statusCode: 409, error: 'WITHDRAW_LIVE_MATCH', message: 'El equipo tiene un partido en juego: termina o suspende ese partido antes de retirarlo' });
+      }
+      if (await this.competition.knockoutAlive(tid, teamId, session)) {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'WITHDRAW_PENDING_KNOCKOUT',
+          message: 'El equipo sigue en la eliminatoria: su cruce no se cancela. Captura antes el resultado que decide la llave (el rival avanza) y después retíralo.',
+        });
+      }
+      const role = await this.access.roleOf(tid, user.id, session);
+      const today = todayISODate();
+      const open = matches.filter((m) => !m.stage?.tie && [MatchStatus.SCHEDULED, MatchStatus.POSTPONED, MatchStatus.SUSPENDED].includes(m.status));
+      for (const m of open) {
+        await this.matches.updateOne({ _id: m._id }, { $set: { status: MatchStatus.CANCELLED } }, { session });
+        if (m.status === MatchStatus.SUSPENDED) await this.incidents.resolveSuspension(session, m, SuspensionDecision.CANCELLED, note, user.id);
+        await this.log.edited(session, { userId: user.id }, m, { ...m, status: MatchStatus.CANCELLED } as typeof m, note);
+      }
+      const active = await this.memberships.find({ tournamentId: tid, teamId: team, active: true }).session(session);
+      for (const membership of active) {
+        membership.active = false;
+        membership.endDate = membership.startDate > today ? membership.startDate : today;
+        membership.endReason = note;
+        membership.audit.push({ action: MembershipAuditAction.UNREGISTERED, reason: note, by: toObjectId(user.id), role, at: new Date(), details: { teamWithdrawn: true } });
+        await membership.save({ session });
+      }
+      enrollment.withdrawnAt = today;
+      enrollment.audit.push({
+        action: EnrollmentAuditAction.WITHDRAWN,
+        reason: reason.trim(),
+        by: toObjectId(user.id),
+        role,
+        at: new Date(),
+        details: { cancelledMatchIds: open.map((m) => m._id.toHexString()), closedMemberships: active.map((x) => x._id.toHexString()) },
+      });
+      await enrollment.save({ session });
+    });
+    return this.listTeams(tournamentId);
+  }
+
+  /**
+   * 3D — reincorpora a un equipo retirado, con motivo. No restaura nada automáticamente: sus partidos
+   * cancelados siguen cancelados (el organizador reprograma los que correspondan) y sus jugadores se
+   * vuelven a inscribir. No se puede si ya se generó una eliminatoria automática sin él: cambiaría
+   * una clasificación ya usada.
+   */
+  async reinstateTeam(tournamentId: string, teamId: string, reason: string, user: AuthUser) {
+    await this.ownership.tournament(tournamentId, user, Permission.TEAMS);
+    const [tid, team] = [toObjectId(tournamentId), toObjectId(teamId)];
+    await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
+      const enrollment = await this.enrollments.findOne({ tournamentId: tid, teamId: team }).session(session);
+      if (!enrollment) throw new NotFoundException('El equipo no está inscrito en este torneo');
+      if (!enrollment.withdrawnAt) throw new ConflictException({ statusCode: 409, error: 'TEAM_NOT_WITHDRAWN', message: 'El equipo no está retirado' });
+      if ((await this.competition.phasesAdvancedWithout(tid, teamId, session)).length) {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'REINSTATE_PHASE_ADVANCED',
+          message: 'La eliminatoria ya se generó con los clasificados sin este equipo: reincorporarlo cambiaría una clasificación ya usada',
+        });
+      }
+      const role = await this.access.roleOf(tid, user.id, session);
+      enrollment.audit.push({ action: EnrollmentAuditAction.REINSTATED, reason: reason.trim(), by: toObjectId(user.id), role, at: new Date(), details: { withdrawnAt: enrollment.withdrawnAt } });
+      enrollment.withdrawnAt = null;
+      await enrollment.save({ session });
+    });
+    return this.listTeams(tournamentId);
   }
 
   private async list(

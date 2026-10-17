@@ -38,7 +38,7 @@ async function tournamentWith(...teams: string[]) {
   return t;
 }
 const put = (u: Acc, team: string, t: string, p: string, body: object = {}) => as(u).put(`/api/teams/${team}/tournaments/${t}/players/${p}`).send(body);
-const del = (u: Acc, team: string, t: string, p: string) => as(u).delete(`/api/teams/${team}/tournaments/${t}/players/${p}`);
+const del = (u: Acc, team: string, t: string, p: string) => as(u).delete(`/api/teams/${team}/tournaments/${t}/players/${p}`).send({ reason: 'Baja de prueba' });
 const list = async (u: Acc, team: string) => (await as(u).get(`/api/teams/${team}/tournaments`).expect(200)).body;
 const publicRoster = async (t: string, team: string) => (await request(http).get(`/api/tournaments/${t}/players?teamId=${team}`).expect(200)).body as { player: { id: string }; membership: { jerseyNumber: number | null } }[];
 
@@ -95,12 +95,12 @@ describe('Alta y baja desde el equipo', () => {
     await del(m, team, t, p).expect(204);
   });
 
-  it('reglas: no inscrito → 404, fuera de la plantilla global → 409, dorsal ocupado → 409, máximo de jugadores → 409', async () => {
+  it('reglas: no inscrito → 409 TEAM_NOT_ENROLLED (3A, antes 404), fuera de la plantilla global → 409, dorsal ocupado → 409, máximo de jugadores → 409', async () => {
     const u = await account('Reglas');
     const team = await ownTeam(u);
     const [a, b, c] = [await newPlayer(u, team), await newPlayer(u, team), await newPlayer(u, team)];
     const notEnrolled = await tournamentWith();
-    expect((await put(u, team, notEnrolled, a).expect(404)).body.message).toMatch(/no está inscrito/);
+    expect((await put(u, team, notEnrolled, a).expect(409)).body).toMatchObject({ error: 'TEAM_NOT_ENROLLED', message: expect.stringMatching(/no está inscrito/) });
 
     const t = await tournamentWith(team);
     await as(u).delete(`/api/teams/${team}/global-roster/${c}`).expect(204);

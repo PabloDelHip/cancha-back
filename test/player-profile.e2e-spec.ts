@@ -39,8 +39,8 @@ async function newPlayer(org: Org, extra: Record<string, unknown> = {}) {
     await as(org).post('/api/players').send({ confirmNew: true, firstName: 'Jugador', lastName: `P${seq}`, position: 'FORWARD', ...extra }).expect(201)
   ).body.id as string;
 }
-const registerIn = (org: Org, tournamentId: string, playerId: string, teamId: string, jerseyNumber: number) =>
-  as(org).put(`/api/tournaments/${tournamentId}/players/${playerId}`).send({ teamId, jerseyNumber, startDate: '2027-01-01' }).expect(200);
+const registerIn = (org: Org, tournamentId: string, playerId: string, teamId: string, jerseyNumber: number, startDate = '2027-01-01') =>
+  as(org).put(`/api/tournaments/${tournamentId}/players/${playerId}`).send({ teamId, jerseyNumber, startDate }).expect(200);
 async function match(org: Org, tournamentId: string, round: number, home: string, away: string, date: string) {
   return (
     await as(org)
@@ -94,7 +94,7 @@ beforeAll(async () => {
   x.copa = await tournament(A, '2026-11-01');
   x.tigres = await team(A, x.copa, 'Tigres FC');
   x.rivalCopa = await team(A, x.copa);
-  await registerIn(A, x.copa, x.pablo, x.tigres, 14);
+  await registerIn(A, x.copa, x.pablo, x.tigres, 14, '2026-11-01'); // elegible desde el inicio de la Copa (3A)
   x.mCopa = await match(A, x.copa, 1, x.tigres, x.rivalCopa, '2026-11-07');
   await result(A, x.mCopa, 2, 1, [line(x.pablo, x.tigres, { goals: 1 })]);
   await as(A).post(`/api/tournaments/${x.copa}/finish`).send({}).expect(200);

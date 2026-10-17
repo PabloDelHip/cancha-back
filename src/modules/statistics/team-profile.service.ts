@@ -91,7 +91,7 @@ export class TeamProfileService {
     const [tournaments, allMatches, tournamentTeams, players] = await Promise.all([
       this.tournaments.find({ _id: { $in: tournamentIds } }).select('name status category format startDate endDate dataCoverage settings phases').lean(),
       this.matches.find({ tournamentId: { $in: tournamentIds } }).select(MATCH_FIELDS).lean<LeanMatch[]>(),
-      this.enrollments.find({ tournamentId: { $in: tournamentIds } }).select('tournamentId teamId').lean(),
+      this.enrollments.find({ tournamentId: { $in: tournamentIds } }).select('tournamentId teamId withdrawnAt').lean(),
       this.players.find({ _id: { $in: playerIds } }).lean(),
     ]);
     const matches = allMatches.map(toTPMatch);
@@ -120,6 +120,7 @@ export class TeamProfileService {
             qualifiersPerGroup: t.settings?.qualifiersPerGroup ?? null,
             knockoutTiebreak: t.settings?.knockoutTiebreak,
             finalTiebreak: t.settings?.finalTiebreak ?? null,
+            withdrawnTeamIds: tournamentTeams.filter((e) => e.withdrawnAt && e.tournamentId.equals(t._id)).map((e) => e.teamId.toHexString()),
           },
         ]),
       ),

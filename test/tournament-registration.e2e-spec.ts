@@ -274,7 +274,7 @@ describe('Aprobación atómica y casos de dominio', () => {
     expect((await api().get(`/api/players/${juan}/stats`).expect(200)).body).toEqual(statsBefore);
 
     // CASO C: el organizador retira a Pedro del torneo → su plantilla global sigue ACTIVE.
-    await as(L).delete(`/api/tournaments/${t}/players/${pedro}`).expect(204);
+    await as(L).delete(`/api/tournaments/${t}/players/${pedro}`).send({ reason: 'Baja de prueba' }).expect(204);
     expect(await memberships.countDocuments({ tournamentId: oid(t), playerId: oid(pedro), active: true })).toBe(0);
     expect(await rosters.countDocuments({ teamId: oid(dep.team), playerId: oid(pedro), status: TeamRosterStatus.ACTIVE })).toBe(1);
 

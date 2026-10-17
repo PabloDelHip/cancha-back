@@ -17,6 +17,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -253,6 +254,16 @@ export class FinishTournamentDto {
   @IsOptional()
   @IsBoolean()
   allowPendingMatches?: boolean;
+}
+
+/** 3D — retirar o reincorporar un equipo inscrito: el motivo es obligatorio. */
+export class TeamWithdrawalDto {
+  @ApiProperty({ minLength: 3, maxLength: 300 })
+  @Trim()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(300)
+  reason: string;
 }
 
 export class TournamentQueryDto extends PaginationQueryDto {

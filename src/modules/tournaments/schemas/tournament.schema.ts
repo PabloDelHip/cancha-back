@@ -109,6 +109,14 @@ export class TournamentRegistrationSettings {
 
   @Prop({ type: String, default: null })
   deadline: string | null;
+
+  /** 3C: último día (YYYY-MM-DD, inclusivo, fecha real de la operación) para cambiar jugadores de equipo. null = sin límite. */
+  @Prop({ type: String, default: null })
+  transferDeadline: string | null;
+
+  /** 3C: sin cambios de equipo desde el primer partido de eliminatoria (salvo excepción con motivo). */
+  @Prop({ type: Boolean, default: false })
+  lockTransfersOnKnockout: boolean;
 }
 export const TournamentRegistrationSettingsSchema = SchemaFactory.createForClass(TournamentRegistrationSettings);
 export const DEFAULT_REGISTRATION: TournamentRegistrationSettings = {
@@ -118,6 +126,8 @@ export const DEFAULT_REGISTRATION: TournamentRegistrationSettings = {
   maxPlayers: null,
   maxTeams: null,
   deadline: null,
+  transferDeadline: null,
+  lockTransfersOnKnockout: false,
 };
 
 @Schema({ timestamps: true, collection: 'tournaments' })

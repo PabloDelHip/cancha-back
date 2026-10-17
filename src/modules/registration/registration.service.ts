@@ -8,11 +8,13 @@ import { RegistrationDraft } from './schemas/registration-draft.schema.js';
 import { RegistrationRequest } from './schemas/registration-request.schema.js';
 import { DEFAULT_REGISTRATION, Tournament, TournamentRegistrationSettings } from '../tournaments/schemas/tournament.schema.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
+import { PlayerBlock } from '../players/schemas/player-block.schema.js';
+import { blockedAmong } from '../players/blocks.js';
 import { Team } from '../teams/schemas/team.schema.js';
 import { TeamAdmin } from '../teams/schemas/team-admin.schema.js';
 import { TeamRoster } from '../teams/schemas/team-roster.schema.js';
 import { Player } from '../players/schemas/player.schema.js';
-import { TeamMembership } from '../players/schemas/team-membership.schema.js';
+import { MembershipAuditAction, TeamMembership } from '../players/schemas/team-membership.schema.js';
 import { User } from '../users/schemas/user.schema.js';
 import {
   RegistrationLinkStatus,
@@ -58,7 +60,7 @@ const CLOSED_MESSAGE: Record<ClosedReason, string> = {
 
 /** Problema de una selección (envío, detalle del organizador y aprobación usan la misma función). */
 export interface SelectionProblem {
-  code: 'TEAM_NOT_FOUND' | 'ALREADY_ENROLLED' | 'FULL' | 'PLAYER_NOT_FOUND' | 'NOT_IN_ROSTER' | 'OTHER_TEAM' | 'TOO_FEW' | 'TOO_MANY';
+  code: 'TEAM_NOT_FOUND' | 'ALREADY_ENROLLED' | 'FULL' | 'PLAYER_NOT_FOUND' | 'NOT_IN_ROSTER' | 'OTHER_TEAM' | 'PREVIOUS_TEAM' | 'BLOCKED' | 'TOO_FEW' | 'TOO_MANY';
   message: string;
   playerIds?: string[];
 }
@@ -84,6 +86,7 @@ export class RegistrationService {
     @InjectModel(RegistrationRequest.name) private readonly requests: Model<RegistrationRequest>,
     @InjectModel(RegistrationDraft.name) private readonly drafts: Model<RegistrationDraft>,
     @InjectModel(TournamentTeam.name) private readonly enrollments: Model<TournamentTeam>,
+    @InjectModel(PlayerBlock.name) private readonly blocks: Model<PlayerBlock>,
     @InjectModel(Team.name) private readonly teams: Model<Team>,
     @InjectModel(TeamAdmin.name) private readonly admins: Model<TeamAdmin>,
     @InjectModel(TeamRoster.name) private readonly rosters: Model<TeamRoster>,
@@ -222,7 +225,11 @@ export class RegistrationService {
       await this.enrollments.create([{ tournamentId: owned._id, teamId: request.teamId }], { session });
       const startDate = todayISODate();
       await this.memberships.insertMany(
-        request.playerIds.map((playerId) => ({ playerId, teamId: request.teamId, tournamentId: owned._id, jerseyNumber: null, startDate, endDate: null, active: true })),
+        // 3A: elegibles desde la aprobación; queda quién la aprobó.
+        request.playerIds.map((playerId) => ({
+          playerId, teamId: request.teamId, tournamentId: owned._id, jerseyNumber: null, startDate, registeredAt: startDate, endDate: null, active: true,
+          audit: [{ action: MembershipAuditAction.REGISTERED, reason: null, by: toObjectId(user.id), role: 'REQUEST', at: new Date(), details: { requestId: request._id.toHexString() } }],
+        })),
         { session },
       );
       const res = await this.requests.updateOne(
@@ -528,6 +535,9 @@ export class RegistrationService {
     const players = await this.players.find({ _id: { $in: playerIds } }).select('firstName lastName').session(s).lean();
     const roster = await this.rosters.find({ teamId, playerId: { $in: playerIds }, status: TeamRosterStatus.ACTIVE }).select('playerId').session(s).lean();
     const active = await this.memberships.find({ tournamentId: t._id, playerId: { $in: playerIds }, active: true }).select('playerId teamId').session(s).lean();
+    // 3D: quien ya jugó en el torneo con otro equipo (participación cerrada) entra solo como cambio de equipo.
+    const closed = await this.memberships.find({ tournamentId: t._id, playerId: { $in: playerIds }, active: false, teamId: { $ne: teamId } }).select('playerId').session(s).lean();
+    const blocked = await blockedAmong(this.blocks, s, t._id, playerIds.map((id) => id.toHexString()), todayISODate());
     if (!team) return [{ code: 'TEAM_NOT_FOUND', message: 'El equipo ya no existe.' }];
     const problems: SelectionProblem[] = [];
     if (enrolled) problems.push({ code: 'ALREADY_ENROLLED', message: 'Este equipo ya está inscrito en el torneo.' });
@@ -555,6 +565,17 @@ export class RegistrationService {
         message: elsewhere.map((m) => `${name.get(m.playerId.toHexString())} ya juega con ${teamName.get(m.teamId.toHexString()) ?? 'otro equipo'} en este torneo.`).join(' '),
         playerIds: elsewhere.map((m) => m.playerId.toHexString()),
       });
+    }
+    const previous = [...new Set(closed.map((m) => m.playerId.toHexString()))].filter((id) => !elsewhere.some((m) => m.playerId.equals(id)));
+    if (previous.length) {
+      problems.push({
+        code: 'PREVIOUS_TEAM',
+        message: `${previous.map((id) => name.get(id)).join(', ')} ya ${previous.length === 1 ? 'jugó' : 'jugaron'} con otro equipo en este torneo: entra${previous.length === 1 ? '' : 'n'} solo como cambio de equipo, que hace el organizador después de inscribir al equipo.`,
+        playerIds: previous,
+      });
+    }
+    if (blocked.length) {
+      problems.push({ code: 'BLOCKED', message: `${blocked.map((id) => name.get(id)).join(', ')} ${blocked.length === 1 ? 'tiene' : 'tienen'} un bloqueo administrativo en este torneo.`, playerIds: blocked });
     }
     if (r.minPlayers !== null && ids.length < r.minPlayers) problems.push({ code: 'TOO_FEW', message: `Se necesitan al menos ${r.minPlayers} jugadores (hay ${ids.length}).` });
     if (r.maxPlayers !== null && ids.length > r.maxPlayers) problems.push({ code: 'TOO_MANY', message: `Se permiten como máximo ${r.maxPlayers} jugadores (hay ${ids.length}).` });

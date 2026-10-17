@@ -39,6 +39,17 @@ export class UpdateRegistrationSettingsDto {
   @ValidateIf((_, v) => v !== null)
   @IsISODateOnly()
   deadline?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, type: String, description: '3C: último día para cambiar jugadores de equipo (YYYY-MM-DD, inclusiva). null = sin límite' })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsISODateOnly()
+  transferDeadline?: string | null;
+
+  @ApiPropertyOptional({ description: '3C: bloquear cambios de equipo desde el primer partido de eliminatoria (excepción con motivo)' })
+  @IsOptional()
+  @IsBoolean()
+  lockTransfersOnKnockout?: boolean;
 }
 
 /** Selección de jugadores de la plantilla GLOBAL del equipo. */

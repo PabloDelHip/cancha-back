@@ -38,7 +38,7 @@ async function newPlayer(org: Org, firstName: string, birthDate = '2001-04-18') 
   ).body.id as string;
 }
 const register = (org: Org, t: string, player: string, team: string, jerseyNumber: number) =>
-  as(org).put(`/api/tournaments/${t}/players/${player}`).send({ teamId: team, jerseyNumber, startDate: '2026-10-01' }).expect(200);
+  as(org).put(`/api/tournaments/${t}/players/${player}`).send({ teamId: team, jerseyNumber, startDate: '2026-11-01' }).expect(200);
 async function match(org: Org, t: string, round: number, home: string, away: string, date: string) {
   return (
     await as(org).post('/api/matches').send({ tournamentId: t, round, homeTeamId: home, awayTeamId: away, date, time: '18:00' }).expect(201)
@@ -113,7 +113,7 @@ beforeAll(async () => {
   x.canc = await match(B, x.liga, 7, x.empty, x.dm, '2027-02-27');
   await as(B).patch(`/api/matches/${x.canc}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(200);
   // Pedro se da de baja: su participación queda en la historia (active=false).
-  await as(B).delete(`/api/tournaments/${x.liga}/players/${x.pedro}`).expect(204);
+  await as(B).delete(`/api/tournaments/${x.liga}/players/${x.pedro}`).send({ reason: 'Baja de prueba' }).expect(204);
 
   // Torneo DRAFT de A donde DM ya está inscrito (por empezar).
   x.estatal = await tournament(A, '2028-03-01', 'DRAFT');

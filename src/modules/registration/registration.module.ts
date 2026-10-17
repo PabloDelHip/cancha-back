@@ -18,6 +18,7 @@ import { RegistrationAdminController, RegistrationLinkController } from './regis
       Models.player,
       Models.membership,
       Models.user,
+      Models.playerBlock,
     ]),
   ],
   controllers: [RegistrationAdminController, RegistrationLinkController],

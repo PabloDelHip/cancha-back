@@ -228,6 +228,8 @@ export enum MatchLogAction {
   /** Fotografías de evidencia (2D). */
   EVIDENCE_ADDED = 'EVIDENCE_ADDED',
   EVIDENCE_REMOVED = 'EVIDENCE_REMOVED',
+  /** 3A: corrección administrativa — un jugador figura con dos equipos en la misma fecha deportiva. */
+  ELIGIBILITY_OVERRIDE = 'ELIGIBILITY_OVERRIDE',
   /** Un partido eliminado (copia y recursos liberados). */
   DELETED = 'DELETED',
   /** Calendario reemplazado: una entrada con todos los partidos eliminados. */

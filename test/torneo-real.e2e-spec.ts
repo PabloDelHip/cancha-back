@@ -474,7 +474,7 @@ describe('Torneo FINISHED = historial inmutable', () => {
     await as(A).put(`/api/tournaments/${x.id}/players/${x.free}`).send({ teamId: x.home, jerseyNumber: 20 }).expect(409);
     await as(A).put(`/api/tournaments/${x.id}/players/${x.scorer}`).send({ teamId: x.home, jerseyNumber: 99 }).expect(409);
     await as(A).put(`/api/tournaments/${x.id}/players/${x.scorer}`).send({ teamId: x.away, jerseyNumber: 9 }).expect(409);
-    await as(A).delete(`/api/tournaments/${x.id}/players/${x.bench}`).expect(409);
+    await as(A).delete(`/api/tournaments/${x.id}/players/${x.bench}`).send({ reason: 'Baja de prueba' }).expect(409);
   });
 
   it('jornadas y calendario: no se crean, editan, eliminan ni regeneran', async () => {

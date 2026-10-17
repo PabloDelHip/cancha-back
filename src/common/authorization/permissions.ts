@@ -43,6 +43,12 @@ export enum Permission {
   EVIDENCE_REMOVE = 'EVIDENCE_REMOVE',
   /** Teléfono y correo de los árbitros del propietario (dentro del torneo). */
   REFEREE_CONTACT = 'REFEREE_CONTACT',
+  /**
+   * Excepciones de inscripción (3A), siempre con motivo y auditadas: superar el máximo de
+   * jugadores por equipo, elegibilidad con fecha retroactiva y permitir que un jugador figure con
+   * dos equipos en la misma fecha deportiva. Solo propietario y administradores.
+   */
+  REGISTRATION_EXCEPTIONS = 'REGISTRATION_EXCEPTIONS',
 }
 
 export type AccessRole = 'OWNER' | TournamentRole;

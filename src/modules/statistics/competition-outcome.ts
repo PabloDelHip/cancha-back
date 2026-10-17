@@ -40,6 +40,7 @@ export function structureOf(ctx: CompetitionContext, nameOf: (id: string) => str
     phases: t.phases ?? [],
     matches: ctx.matches,
     teamIds: ctx.teamIds,
+    withdrawnTeamIds: t.withdrawnTeamIds ?? [],
     nameOf,
   });
 }

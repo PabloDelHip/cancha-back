@@ -209,7 +209,7 @@ describe('cierre del módulo', () => {
     const after = (await as().post('/api/matches').send({ tournamentId: s.t, round: 6, homeTeamId: third, awayTeamId: s.away, date: '2027-01-30', time: '20:00' }).expect(201)).body.id;
     // Expulsado con su equipo el 7 ene; pasa al tercero el 12 ene (su equipo ya no juega después).
     await result(s, s.matches[0], { redCards: 1, sendOff: 'DIRECT' });
-    await as().put(`/api/tournaments/${s.t}/players/${s.player}`).send({ teamId: third, startDate: '2027-01-12' }).expect(200);
+    await as().put(`/api/tournaments/${s.t}/players/${s.player}`).send({ teamId: third, fromTeamId: s.home, transferReason: 'Cambio de prueba', startDate: '2027-01-12' }).expect(200);
     await as().patch(`/api/matches/${s.matches[1]}`).send({ reason: 'Motivo de prueba', status: 'CANCELLED' }).expect(200);
 
     // El partido del 10 ene (antes de llegar) no cuenta; el del 30 ene queda reservado.

@@ -27,11 +27,16 @@ import {
 } from '@nestjs/swagger';
 import { PlayersService } from './players.service.js';
 import { MembershipsService } from './memberships.service.js';
+import { PlayerBlocksService } from './player-blocks.service.js';
+import { RosterHistoryService } from './roster-history.service.js';
 import {
+  BlockPlayerDto,
   CreatePlayerWithCheckDto,
+  LiftBlockDto,
   MembershipQueryDto,
+  UnregisterPlayerDto,
   PlayerQueryDto,
-  RegisterPlayerDto, RosterQueryDto, TeamTournamentPlayerDto,
+  RegisterPlayerDto, RosterHistoryQueryDto, RosterQueryDto, TeamTournamentPlayerDto,
   UpdatePlayerDto,
 } from './dto/player.dto.js';
 import { Public } from '../auth/decorators/public.decorator.js';
@@ -46,6 +51,8 @@ export class PlayersController {
   constructor(
     private readonly service: PlayersService,
     private readonly memberships: MembershipsService,
+    private readonly blocks: PlayerBlocksService,
+    private readonly rosterHistoryService: RosterHistoryService,
   ) {}
 
   @Public()
@@ -183,14 +190,79 @@ export class PlayersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiTags('tournaments')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Dar de baja a un jugador de mi torneo (conserva el historial)' })
+  @ApiOperation({ summary: 'Dar de baja a un jugador de mi torneo, con motivo (conserva estadísticas e historial)' })
   @ApiForbiddenResponse({ description: 'El torneo pertenece a otro organizador' })
   unregister(
     @Param('tournamentId', IsObjectIdPipe) tournamentId: string,
     @Param('playerId', IsObjectIdPipe) playerId: string,
+    @Body() dto: UnregisterPlayerDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.memberships.unregister(tournamentId, playerId, user);
+    return this.memberships.unregister(tournamentId, playerId, dto.reason, user);
+  }
+
+  @Post('tournaments/:tournamentId/players/:playerId/annul-transfer')
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('tournaments')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Anular la última transferencia de un jugador (errónea), con motivo',
+    description: 'Solo sin participación con el equipo nuevo. Reabre la participación anterior; la anulada queda en la auditoría. Devuelve el historial del jugador.',
+  })
+  @ApiConflictResponse({ description: 'NOT_A_TRANSFER o TRANSFER_HAS_PARTICIPATION' })
+  annulTransfer(
+    @Param('tournamentId', IsObjectIdPipe) tournamentId: string,
+    @Param('playerId', IsObjectIdPipe) playerId: string,
+    @Body() dto: UnregisterPlayerDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.memberships.annulTransfer(tournamentId, playerId, dto.reason, user);
+  }
+
+  @Get('tournaments/:tournamentId/player-blocks')
+  @ApiTags('tournaments')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '3D: bloqueos administrativos del torneo (vigentes y levantados). Motivo y autores solo con permiso TEAMS' })
+  listBlocks(@Param('tournamentId', IsObjectIdPipe) tournamentId: string, @CurrentUser() user: AuthUser) {
+    return this.blocks.list(tournamentId, user);
+  }
+
+  @Get('tournaments/:tournamentId/roster-history')
+  @ApiTags('tournaments')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '3E: historial de plantillas del torneo (altas, cambios, bajas, excepciones, bloqueos, retiros), lo más reciente primero. Solo permiso TEAMS' })
+  @ApiForbiddenResponse({ description: 'Sin permiso TEAMS en el torneo' })
+  rosterHistory(@Param('tournamentId', IsObjectIdPipe) tournamentId: string, @Query() query: RosterHistoryQueryDto, @CurrentUser() user: AuthUser) {
+    return this.rosterHistoryService.list(tournamentId, query, user);
+  }
+
+  @Post('tournaments/:tournamentId/players/:playerId/block')
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('tournaments')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '3D: bloquear administrativamente a un jugador en mi torneo, con motivo (no es una sanción)' })
+  @ApiConflictResponse({ description: 'PLAYER_ALREADY_BLOCKED' })
+  block(
+    @Param('tournamentId', IsObjectIdPipe) tournamentId: string,
+    @Param('playerId', IsObjectIdPipe) playerId: string,
+    @Body() dto: BlockPlayerDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.blocks.block(tournamentId, playerId, dto, user);
+  }
+
+  @Post('tournaments/:tournamentId/players/:playerId/unblock')
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('tournaments')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '3D: levantar el bloqueo administrativo vigente, con motivo' })
+  unblock(
+    @Param('tournamentId', IsObjectIdPipe) tournamentId: string,
+    @Param('playerId', IsObjectIdPipe) playerId: string,
+    @Body() dto: LiftBlockDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.blocks.lift(tournamentId, playerId, dto, user);
   }
 
   @Get('teams/:id/tournaments')
@@ -225,15 +297,16 @@ export class PlayersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiTags('teams')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Dar de baja a un jugador de mi equipo en un torneo (conserva el historial)' })
+  @ApiOperation({ summary: 'Dar de baja a un jugador de mi equipo en un torneo, con motivo (conserva el historial)' })
   @ApiForbiddenResponse({ description: 'No administras este equipo' })
   unregisterByTeam(
     @Param('id', IsObjectIdPipe) id: string,
     @Param('tournamentId', IsObjectIdPipe) tournamentId: string,
     @Param('playerId', IsObjectIdPipe) playerId: string,
+    @Body() dto: UnregisterPlayerDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.memberships.unregisterByTeam(id, tournamentId, playerId, user);
+    return this.memberships.unregisterByTeam(id, tournamentId, playerId, dto.reason, user);
   }
 
   @Public()

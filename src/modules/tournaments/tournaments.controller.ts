@@ -32,6 +32,7 @@ import {
   CreateTournamentDto,
   EnrollmentQueryDto,
   FinishTournamentDto,
+  TeamWithdrawalDto,
   TournamentQueryDto,
   UpdateTournamentDto,
 } from './dto/tournament.dto.js';
@@ -201,6 +202,34 @@ export class TournamentsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.removeTeam(tournamentId, teamId, user);
+  }
+
+  @Post('tournaments/:tournamentId/teams/:teamId/withdraw')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '3D: retirar un equipo con partidos (conserva resultados; cancela sus pendientes; cierra sus participaciones). Con motivo' })
+  @ApiConflictResponse({ description: 'TEAM_HAS_NO_MATCHES, TEAM_ALREADY_WITHDRAWN, WITHDRAW_LIVE_MATCH o WITHDRAW_PENDING_KNOCKOUT' })
+  withdrawTeam(
+    @Param('tournamentId', IsObjectIdPipe) tournamentId: string,
+    @Param('teamId', IsObjectIdPipe) teamId: string,
+    @Body() dto: TeamWithdrawalDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.withdrawTeam(tournamentId, teamId, dto.reason, user);
+  }
+
+  @Post('tournaments/:tournamentId/teams/:teamId/reinstate')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '3D: reincorporar un equipo retirado, con motivo (no restaura partidos ni participaciones)' })
+  @ApiConflictResponse({ description: 'TEAM_NOT_WITHDRAWN o REINSTATE_PHASE_ADVANCED' })
+  reinstateTeam(
+    @Param('tournamentId', IsObjectIdPipe) tournamentId: string,
+    @Param('teamId', IsObjectIdPipe) teamId: string,
+    @Body() dto: TeamWithdrawalDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.reinstateTeam(tournamentId, teamId, dto.reason, user);
   }
 
   @Public()

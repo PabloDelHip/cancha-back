@@ -27,6 +27,7 @@ import { MatchIncidentsModule } from '../match-incidents/match-incidents.module.
       Models.membership,
       Models.round,
       Models.matchSheet,
+      Models.playerBlock,
     ]),
   ],
   controllers: [MatchesController],

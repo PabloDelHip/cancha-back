@@ -52,7 +52,8 @@ export class ScheduleService {
     return this.ownership.inTournament(tid, { user, permission: Permission.SCHEDULE }, async (session) => {
       const tournament = (await this.tournaments.findById(tid).session(session).lean())!;
       const settings = { ...DEFAULT_SETTINGS, ...tournament.settings };
-      const enrolled = (await this.enrollments.distinct('teamId', { tournamentId: tid }).session(session)).map(String);
+      // 3D: los retirados no entran en un calendario nuevo.
+      const enrolled = (await this.enrollments.distinct('teamId', { tournamentId: tid, withdrawnAt: null }).session(session)).map(String);
       const formatErrors = validateFormatForTeams(settings, enrolled.length);
       if (formatErrors.length) throw new BadRequestException(formatErrors);
       // Orden determinista: la siembra del organizador o, por defecto, alfabético.

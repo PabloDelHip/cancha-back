@@ -12,10 +12,12 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator';
 import { PlayerPosition } from '../../../common/enums/index.js';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto.js';
 import { IsISODateOnly, Trim } from '../../../common/validators.js';
+import { RosterEventAction } from '../roster-history.js';
 
 export class CreatePlayerDto {
   @ApiProperty({ example: 'Pablo' })
@@ -117,6 +119,83 @@ export class RegisterPlayerDto {
   @IsOptional()
   @IsISODateOnly()
   startDate?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Cambio de equipo explícito: equipo actual del jugador en este torneo. Sin él, inscribir a quien ya juega con otro equipo → 409 PLAYER_IN_OTHER_TEAM (nunca se le mueve sin querer).',
+  })
+  @IsOptional()
+  @IsMongoId()
+  fromTeamId?: string;
+
+  @ApiPropertyOptional({ maxLength: 300, description: 'Justificación de una fecha efectiva anterior a hoy (excepción RETROACTIVE; permiso REGISTRATION_EXCEPTIONS)' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(300)
+  retroactiveReason?: string;
+
+  @ApiPropertyOptional({ maxLength: 300, description: 'Justificación para superar el máximo de jugadores por equipo (excepción OVER_LIMIT; permiso REGISTRATION_EXCEPTIONS)' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(300)
+  overLimitReason?: string;
+
+  @ApiPropertyOptional({ minLength: 3, maxLength: 300, description: '3C: motivo del cambio de equipo (obligatorio con `fromTeamId`)' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(300)
+  transferReason?: string;
+
+  @ApiPropertyOptional({ maxLength: 300, description: '3C: justificación de un cambio con la eliminatoria iniciada (excepción KNOCKOUT_EXCEPTION; permiso REGISTRATION_EXCEPTIONS)' })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(300)
+  knockoutReason?: string;
+}
+
+/** Baja de un jugador del torneo (3A): el motivo es obligatorio. */
+export class UnregisterPlayerDto {
+  @ApiProperty({ minLength: 3, maxLength: 300 })
+  @Trim()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(300)
+  reason: string;
+}
+
+/** 3D — aplicar un bloqueo administrativo (motivo obligatorio; fecha anterior a hoy = excepción). */
+export class BlockPlayerDto {
+  @ApiProperty({ minLength: 3, maxLength: 300 })
+  @Trim()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(300)
+  reason: string;
+
+  @ApiPropertyOptional({ description: 'Primer día bloqueado (YYYY-MM-DD). Por defecto hoy; anterior a hoy requiere REGISTRATION_EXCEPTIONS.' })
+  @IsOptional()
+  @IsISODateOnly()
+  since?: string;
+}
+
+/** 3D — levantar el bloqueo vigente (motivo obligatorio; fecha anterior a hoy = excepción). */
+export class LiftBlockDto {
+  @ApiProperty({ minLength: 3, maxLength: 300 })
+  @Trim()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(300)
+  reason: string;
+
+  @ApiPropertyOptional({ description: 'Primer día ya habilitado (YYYY-MM-DD). Por defecto hoy; anterior a hoy requiere REGISTRATION_EXCEPTIONS.' })
+  @IsOptional()
+  @IsISODateOnly()
+  until?: string;
 }
 
 /** Alta desde el equipo: solo el dorsal (el equipo sale de la ruta y la fecha es hoy). */
@@ -168,4 +247,33 @@ export class MembershipQueryDto extends PaginationQueryDto {
   )
   @IsBoolean()
   active?: boolean;
+}
+
+/** 3E — filtros del historial de plantillas del torneo (todos opcionales y combinables). */
+export class RosterHistoryQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsMongoId()
+  playerId?: string;
+
+  @ApiPropertyOptional({ description: 'Equipo involucrado (también como origen de un cambio)' })
+  @IsOptional()
+  @IsMongoId()
+  teamId?: string;
+
+  @ApiPropertyOptional({ description: 'Acciones separadas por coma', example: 'TRANSFER,UNREGISTERED' })
+  @IsOptional()
+  @Transform(({ value }) => (Array.isArray(value) ? value : String(value).split(',')).map((v: string) => v.trim()).filter(Boolean))
+  @IsEnum(RosterEventAction, { each: true })
+  action?: RosterEventAction[];
+
+  @ApiPropertyOptional({ description: 'Desde (YYYY-MM-DD, inclusive), por el día en que se registró' })
+  @IsOptional()
+  @IsISODateOnly()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Hasta (YYYY-MM-DD, inclusive)' })
+  @IsOptional()
+  @IsISODateOnly()
+  to?: string;
 }

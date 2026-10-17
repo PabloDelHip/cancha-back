@@ -2,6 +2,7 @@ import { MatchLogModule } from '../match-log/match-log.module.js';
 import { RefereesModule } from '../referees/referees.module.js';
 import { VenuesModule } from '../venues/venues.module.js';
 import { CompetitionModule } from '../competition/competition.module.js';
+import { MatchIncidentsModule } from '../match-incidents/match-incidents.module.js';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Models } from '../../common/models.js';
@@ -18,6 +19,7 @@ import { TournamentInvitationsService } from './tournament-invitations.service.j
     VenuesModule,
     RefereesModule,
     MatchLogModule,
+    MatchIncidentsModule,
     MongooseModule.forFeature([
       Models.tournament,
       Models.tournamentTeam,
@@ -34,6 +36,8 @@ import { TournamentInvitationsService } from './tournament-invitations.service.j
       Models.tournamentMember,
       Models.tournamentInvitation,
       Models.user,
+      Models.playerBlock,
+      Models.removedEnrollment,
     ]),
   ],
   controllers: [TournamentsController, TournamentMembersController, TournamentInvitationsController],

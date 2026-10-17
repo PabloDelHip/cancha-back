@@ -289,7 +289,7 @@ describe('Equipos y jugadores (globales)', () => {
       .send({ teamId: B.home, jerseyNumber: 30 })
       .expect(403);
     await as(A)
-      .delete(`/api/tournaments/${B.tournament}/players/${B.homePlayer}`)
+      .delete(`/api/tournaments/${B.tournament}/players/${B.homePlayer}`).send({ reason: 'Baja de prueba' })
       .expect(403);
     const roster = await api().get(`/api/teams/${B.home}/roster`).expect(200);
     expect(

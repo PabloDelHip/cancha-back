@@ -118,7 +118,7 @@ export class PlayerProfileService {
         .select('name status category format startDate endDate dataCoverage settings phases')
         .lean(),
       this.matches.find({ tournamentId: { $in: tournamentIds } }).select(MATCH_FIELDS).lean<LeanMatch[]>(),
-      this.enrollments.find({ tournamentId: { $in: tournamentIds } }).select('tournamentId teamId').lean(),
+      this.enrollments.find({ tournamentId: { $in: tournamentIds } }).select('tournamentId teamId withdrawnAt').lean(),
     ]);
     const matches = allMatches.map(toStaged);
     const finishedTournaments = new Set(tournaments.filter((t) => t.status === 'FINISHED').map((t) => t._id.toHexString()));
@@ -172,6 +172,7 @@ export class PlayerProfileService {
               qualifiersPerGroup: t.settings?.qualifiersPerGroup ?? null,
               knockoutTiebreak: t.settings?.knockoutTiebreak,
               finalTiebreak: t.settings?.finalTiebreak ?? null,
+              withdrawnTeamIds: enrolled.filter((e) => e.withdrawnAt && e.tournamentId.equals(t._id)).map((e) => e.teamId.toHexString()),
             },
             matches: byTournament.get(id) ?? [],
             teamIds: teamsIn.get(id) ?? [],
