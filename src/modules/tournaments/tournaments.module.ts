@@ -38,6 +38,7 @@ import { TournamentInvitationsService } from './tournament-invitations.service.j
       Models.user,
       Models.playerBlock,
       Models.removedEnrollment,
+      Models.financeEntry,
     ]),
   ],
   controllers: [TournamentsController, TournamentMembersController, TournamentInvitationsController],

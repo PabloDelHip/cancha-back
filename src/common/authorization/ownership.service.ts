@@ -99,6 +99,18 @@ export class OwnershipService {
   }
 
   /**
+   * Como `inTournament`, pero también con el torneo FINALIZADO (`lockAny`): para escrituras que
+   * siguen después del cierre, como registrar los pagos de un adeudo (módulo 4, F11).
+   */
+  inAnyTournament<T>(tournamentId: string | Types.ObjectId, access: Access, fn: (session: ClientSession) => Promise<T>): Promise<T> {
+    return this.connection.transaction(async (session) => {
+      await this.lockAny(tournamentId, session);
+      await this.access.require(tournamentId, access.user.id, access.permission, session);
+      return fn(session);
+    });
+  }
+
+  /**
    * Cerrojo lógico del torneo dentro de una transacción abierta: escribe su documento solo si
    * no está finalizado y devuelve su estado. Hasta el commit, cualquier otra escritura del
    * mismo torneo (incluida la transición a FINISHED) espera o se reintenta.

@@ -8,6 +8,7 @@ import {
   TournamentTeamSchema,
 } from '../modules/tournaments/schemas/tournament-team.schema.js';
 import { RemovedEnrollment, RemovedEnrollmentSchema } from '../modules/tournaments/schemas/removed-enrollment.schema.js';
+import { FinanceEntry, FinanceEntrySchema } from '../modules/finance/schemas/finance-entry.schema.js';
 import { Team, TeamSchema } from '../modules/teams/schemas/team.schema.js';
 import {
   Player,
@@ -75,6 +76,7 @@ export const Models = {
   disciplineLog: { name: DisciplineLog.name, schema: DisciplineLogSchema },
   playerBlock: { name: PlayerBlock.name, schema: PlayerBlockSchema },
   removedEnrollment: { name: RemovedEnrollment.name, schema: RemovedEnrollmentSchema },
+  financeEntry: { name: FinanceEntry.name, schema: FinanceEntrySchema },
   venue: { name: Venue.name, schema: VenueSchema },
   referee: { name: Referee.name, schema: RefereeSchema },
   matchLog: { name: MatchLog.name, schema: MatchLogSchema },

@@ -31,6 +31,7 @@ import { DEFAULT_MATCH_MINUTES } from '../venues/occupancy.js';
 import { Round } from '../rounds/schemas/round.schema.js';
 import { PlayerBlock } from '../players/schemas/player-block.schema.js';
 import { RemovedEnrollment } from './schemas/removed-enrollment.schema.js';
+import { FinanceEntry } from '../finance/schemas/finance-entry.schema.js';
 import {
   CreateTournamentDto,
   EnrollmentQueryDto,
@@ -80,6 +81,7 @@ export class TournamentsService {
     @InjectModel(TournamentInvitation.name) private readonly invitations: Model<TournamentInvitation>,
     @InjectModel(PlayerBlock.name) private readonly blocks: Model<PlayerBlock>,
     @InjectModel(RemovedEnrollment.name) private readonly removed: Model<RemovedEnrollment>,
+    @InjectModel(FinanceEntry.name) private readonly finance: Model<FinanceEntry>,
     private readonly ownership: OwnershipService,
     private readonly competition: CompetitionService,
     private readonly organizers: OrganizerAccessService,
@@ -197,6 +199,10 @@ export class TournamentsService {
         if (registration.maxTeams! < enrolled) throw new BadRequestException(`Ya hay ${enrolled} equipos inscritos: el cupo no puede ser menor`);
       }
       if (dto.information !== undefined) update.information = information;
+      // Módulo 4 (F8): una sola moneda por torneo; con movimientos registrados ya no cambia.
+      if ((information.costs.currency || 'MXN') !== (current.information?.costs?.currency || 'MXN') && (await this.finance.exists({ tournamentId: toObjectId(id) }).session(session))) {
+        throw new ConflictException({ statusCode: 409, error: 'FINANCE_CURRENCY_LOCKED', message: 'El torneo ya tiene movimientos financieros: su moneda no puede cambiar' });
+      }
       // Otra duración cambia lo que ocupan sus partidos con cancha: se rechaza si alguno chocaría.
       const duration = information.schedule.durationMinutes ?? DEFAULT_MATCH_MINUTES;
       if (duration !== (current.information?.schedule?.durationMinutes ?? DEFAULT_MATCH_MINUTES)) {
@@ -350,6 +356,10 @@ export class TournamentsService {
         throw new ConflictException(
           'El torneo tiene partidos registrados y no puede eliminarse. Cámbialo a FINISHED o elimina antes sus partidos sin resultado.',
         );
+      }
+      // Módulo 4 (F7): los movimientos financieros son historia; nunca se borran con el torneo.
+      if (await this.finance.exists({ tournamentId }).session(session)) {
+        throw new ConflictException({ statusCode: 409, error: 'TOURNAMENT_HAS_FINANCE', message: 'El torneo tiene movimientos financieros registrados y no puede eliminarse' });
       }
       // Sin partidos no hay historia: se retiran inscripciones, participaciones, jornadas y lo
       // disciplinario (sin partidos solo puede haber cambios de reglamento en el historial).

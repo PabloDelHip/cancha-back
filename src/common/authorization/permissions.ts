@@ -49,6 +49,10 @@ export enum Permission {
    * dos equipos en la misma fecha deportiva. Solo propietario y administradores.
    */
   REGISTRATION_EXCEPTIONS = 'REGISTRATION_EXCEPTIONS',
+  /** Módulo 4: consultar cuentas y movimientos financieros del torneo (propietario y administradores). */
+  FINANCE_VIEW = 'FINANCE_VIEW',
+  /** Módulo 4: registrar cargos y pagos (propietario y administradores). */
+  FINANCE_MANAGE = 'FINANCE_MANAGE',
 }
 
 export type AccessRole = 'OWNER' | TournamentRole;

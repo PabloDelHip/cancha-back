@@ -139,6 +139,8 @@ async function run() {
       // 3D/3E: bloqueos administrativos y equipos quitados (referencian torneos, jugadores y equipos).
       playerBlocks: model(Models.playerBlock),
       removedEnrollments: model(Models.removedEnrollment),
+      // Módulo 4: movimientos financieros (referencian torneos, equipos y usuarios).
+      financeEntries: model(Models.financeEntry),
     };
 
     const all = Object.values(m) as Model<unknown>[];

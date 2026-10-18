@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { FinanceEntry } from '../finance/schemas/finance-entry.schema.js';
 import { Model, Types } from 'mongoose';
 import { Team } from './schemas/team.schema.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
@@ -42,6 +43,7 @@ export class TeamsService {
     @InjectModel(Match.name) private readonly matches: Model<Match>,
     @InjectModel(TeamAdmin.name) private readonly admins: Model<TeamAdmin>,
     @InjectModel(TeamRoster.name) private readonly rosters: Model<TeamRoster>,
+    @InjectModel(FinanceEntry.name) private readonly finance: Model<FinanceEntry>,
     private readonly membershipsService: MembershipsService,
     private readonly access: TeamAccessService,
     private readonly tournamentAccess: TournamentAccessService,
@@ -210,6 +212,10 @@ export class TeamsService {
       throw new ConflictException(
         'El equipo tiene partidos registrados y no puede eliminarse',
       );
+    }
+    // Módulo 4 (F7): sus movimientos financieros son historia de los torneos donde jugó.
+    if (await this.finance.exists({ teamId })) {
+      throw new ConflictException({ statusCode: 409, error: 'TEAM_HAS_FINANCE', message: 'El equipo tiene movimientos financieros en un torneo y no puede eliminarse' });
     }
     if (await this.memberships.exists({ teamId })) {
       throw new ConflictException(

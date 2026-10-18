@@ -21,6 +21,7 @@ import { MatchLogModule } from './modules/match-log/match-log.module.js';
 import { MatchIncidentsModule } from './modules/match-incidents/match-incidents.module.js';
 import { AgendaModule } from './modules/agenda/agenda.module.js';
 import { MatchSheetModule } from './modules/match-sheet/match-sheet.module.js';
+import { FinanceModule } from './modules/finance/finance.module.js';
 import { RefereesModule } from './modules/referees/referees.module.js';
 import { VenuesModule } from './modules/venues/venues.module.js';
 import { DisciplineModule } from './modules/discipline/discipline.module.js';
@@ -80,6 +81,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
     MatchIncidentsModule,
     AgendaModule,
     MatchSheetModule,
+    FinanceModule,
   ],
   providers: [
     // Autenticación por defecto en TODAS las rutas; las de lectura pública usan @Public().
