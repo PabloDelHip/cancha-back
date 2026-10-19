@@ -33,10 +33,11 @@ it('los documentos antiguos se leen completos y conservan sus datos al editar', 
   const { body: tournament } = await client.post('/api/tournaments').send(input).expect(201);
   const id = new Types.ObjectId(tournament.id);
   await tournaments.collection.updateOne({ _id: id }, { $set: { dataCoverage: 'PARTIAL', trackedTeamIds: [new Types.ObjectId()] } });
-  const { body: loaded } = await request(http).get(`/api/tournaments/${tournament.id}`).expect(200);
+  // 5B (D4): un borrador solo lo lee su propietario.
+  const { body: loaded } = await client.get(`/api/tournaments/${tournament.id}`).expect(200);
   expect(loaded).toMatchObject({ name: input.name, dataCoverage: 'FULL', trackedTeamIds: [] });
   for (const view of ['standings', 'top-scorers', 'structure']) {
-    await request(http).get(`/api/tournaments/${tournament.id}/${view}`).expect(200);
+    await client.get(`/api/tournaments/${tournament.id}/${view}`).expect(200);
   }
   await client.patch(`/api/tournaments/${tournament.id}`).send({ name: 'Liga actualizada' }).expect(200);
   expect(await tournaments.findById(id).lean()).toMatchObject({ name: 'Liga actualizada', dataCoverage: 'FULL', trackedTeamIds: [] });

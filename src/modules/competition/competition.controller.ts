@@ -2,7 +2,8 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseIntPip
 import { IsObjectIdPipe } from '@nestjs/mongoose';
 import { ApiBearerAuth, ApiConflictResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../auth/decorators/public.decorator.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { CurrentUser, Viewer } from '../auth/decorators/current-user.decorator.js';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { CompetitionService } from './competition.service.js';
 import { AdvancePhaseDto, CreateTieDto } from './dto/advance.dto.js';
@@ -10,7 +11,10 @@ import { AdvancePhaseDto, CreateTieDto } from './dto/advance.dto.js';
 @ApiTags('tournaments')
 @Controller('tournaments/:id')
 export class CompetitionController {
-  constructor(private readonly service: CompetitionService) {}
+  constructor(
+    private readonly service: CompetitionService,
+    private readonly access: TournamentAccessService,
+  ) {}
 
   @Public()
   @Get('structure')
@@ -19,7 +23,8 @@ export class CompetitionController {
     description:
       'Fases del formato: tabla de liga, tablas por grupo con clasificados, cuadro eliminatorio (llaves, origen de cada lado, global, penales, ganador) y campeón derivado de los resultados.',
   })
-  structure(@Param('id', IsObjectIdPipe) id: string) {
+  async structure(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    await this.access.assertVisible(id, viewer);
     return this.service.structure(id);
   }
 

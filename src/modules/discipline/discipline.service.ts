@@ -288,7 +288,8 @@ export class DisciplineService {
         set.matches = dto.matches;
       }
       if (dto.reason !== undefined) set.reason = dto.reason.trim();
-      if (dto.matchId !== undefined) {
+      // 5C: conservar el partido de inicio no se revalida (puede haberse borrado; aplica su `start`).
+      if (dto.matchId !== undefined && !sameId(current.matchId, dto.matchId)) {
         const match = await this.matchesModel.findOne({ _id: toObjectId(dto.matchId), tournamentId }).select(START_FIELDS).session(session).lean();
         if (!match) throw new BadRequestException('El partido no pertenece a este torneo');
         if (!(await this.playsFor(tournamentId, current.playerId, match, session))) {

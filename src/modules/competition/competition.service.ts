@@ -333,8 +333,7 @@ export class CompetitionService {
         (legs.length > 0 && (await this.stats.exists({ matchId: { $in: legs.map((m) => toObjectId(m.id)) } }).session(session)));
       if (played) throw new ConflictException('Ese cruce ya tiene resultado: no se puede quitar');
       if (legs.length) {
-        await this.log.deleting(session, { userId: user.id }, { _id: { $in: legs.map((m) => toObjectId(m.id)) } }, MatchLogCause.TIE_REMOVED);
-        await this.matches.deleteMany({ _id: { $in: legs.map((m) => toObjectId(m.id)) } }, { session });
+        await this.log.removeMatches(session, { userId: user.id }, { _id: { $in: legs.map((m) => toObjectId(m.id)) } }, MatchLogCause.TIE_REMOVED);
       }
       const next = phases.map((p) => (p.index === phase.index ? { ...p, bracket: (p.bracket ?? []).filter((t) => !(t.round === round && t.slot === slot)) } : p));
       await this.tournaments.updateOne({ _id: toObjectId(id) }, { $set: { phases: next } }, { session });
@@ -397,8 +396,7 @@ export class CompetitionService {
         throw new ConflictException(`${r.conflicts[0]}. Corrige primero los resultados de las rondas siguientes.`);
       }
       if (r.remove.length) {
-        await this.log.deleting(session, { ...actor, source: MatchLogSource.SYSTEM }, { _id: { $in: r.remove.map(toObjectId) } }, MatchLogCause.BRACKET_SYNC);
-        await this.matches.deleteMany({ _id: { $in: r.remove.map(toObjectId) } }, { session });
+        await this.log.removeMatches(session, { ...actor, source: MatchLogSource.SYSTEM }, { _id: { $in: r.remove.map(toObjectId) } }, MatchLogCause.BRACKET_SYNC);
       }
       for (const u of r.update) {
         const before = await this.matches.findById(toObjectId(u.matchId)).session(session).lean();

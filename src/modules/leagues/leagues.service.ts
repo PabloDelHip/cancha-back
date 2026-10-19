@@ -1,3 +1,4 @@
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -37,6 +38,7 @@ export class LeaguesService {
     private readonly access: LeagueAccessService,
     private readonly organizers: OrganizerAccessService,
     private readonly competition: CompetitionService,
+    private readonly tournamentAccess: TournamentAccessService,
   ) {}
 
   async create(dto: CreateLeagueDto, user: AuthUser) {
@@ -47,7 +49,7 @@ export class LeaguesService {
 
   async update(id: string, dto: UpdateLeagueDto, user: AuthUser) {
     await this.access.owned(id, user);
-    const updated = await this.leagues.findByIdAndUpdate(id, dto, { new: true, runValidators: true }).lean();
+    const updated = await this.leagues.findByIdAndUpdate(id, dto, { returnDocument: 'after', runValidators: true }).lean();
     return this.view(updated!);
   }
 
@@ -61,9 +63,11 @@ export class LeaguesService {
   }
 
   /** GET /leagues — ligas con al menos un torneo (las vacías no se publican). */
-  async list() {
+  async list(viewer: AuthUser | null = null) {
+    // 5B (D4): los borradores que el visitante no puede ver no cuentan (ni publican una liga).
+    const hidden = await this.tournamentAccess.hiddenDrafts(viewer);
     const counts = await this.tournaments.aggregate<{ _id: Types.ObjectId; n: number; last: string }>([
-      { $match: { leagueId: { $ne: null } } },
+      { $match: { leagueId: { $ne: null }, _id: { $nin: hidden } } },
       { $group: { _id: '$leagueId', n: { $sum: 1 }, last: { $max: '$startDate' } } },
     ]);
     const byId = new Map(counts.map((c) => [c._id.toHexString(), c]));
@@ -85,10 +89,10 @@ export class LeaguesService {
   }
 
   /** GET /leagues/:id — la liga y sus torneos (más recientes primero). */
-  async findOne(id: string) {
+  async findOne(id: string, viewer: AuthUser | null = null) {
     const league = await this.leagues.findById(id).lean();
     if (!league) throw new NotFoundException('Liga no encontrada');
-    const tournaments = await this.tournaments.find({ leagueId: league._id }).select(TOURNAMENT_FIELDS).sort({ startDate: -1 }).lean();
+    const tournaments = await this.tournaments.find({ leagueId: league._id, _id: { $nin: await this.tournamentAccess.hiddenDrafts(viewer) } }).select(TOURNAMENT_FIELDS).sort({ startDate: -1 }).lean();
     return { ...this.view(league), tournaments: tournaments.map((t) => ({ ...tournamentRef(t), system: t.settings?.system ?? 'LEAGUE' })) };
   }
 
@@ -96,10 +100,10 @@ export class LeaguesService {
    * GET /leagues/:id/history — histórico de la liga con partidos oficiales FINALIZADOS de todos sus
    * torneos. Incluye campeones, tabla histórica, récords y estadísticas de jugadores.
    */
-  async history(id: string) {
+  async history(id: string, viewer: AuthUser | null = null) {
     const league = await this.leagues.findById(id).lean();
     if (!league) throw new NotFoundException('Liga no encontrada');
-    const tournaments = await this.tournaments.find({ leagueId: league._id }).select(TOURNAMENT_FIELDS).sort({ startDate: 1 }).lean();
+    const tournaments = await this.tournaments.find({ leagueId: league._id, _id: { $nin: await this.tournamentAccess.hiddenDrafts(viewer) } }).select(TOURNAMENT_FIELDS).sort({ startDate: 1 }).lean();
     const ids = tournaments.map((t) => t._id);
 
     const [matches, enrolled] = await Promise.all([

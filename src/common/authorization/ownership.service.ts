@@ -141,6 +141,22 @@ export class OwnershipService {
     return locked;
   }
 
+  /**
+   * 5B — cerrojo de fichas de jugador dentro de una transacción abierta: escribe cada ficha
+   * (`writeSeq`) y responde 404 si alguna ya no existe. Lo toman el borrado de la ficha y todo lo
+   * que crea una referencia a ella (participación en un torneo, plantilla global, solicitud
+   * aprobada): dos transacciones que escriben la misma ficha no pueden confirmarse ambas, así que
+   * un alta nunca queda apuntando a una ficha borrada.
+   */
+  async lockPlayers(playerIds: (string | Types.ObjectId)[], session: ClientSession) {
+    const ids = [...new Set(playerIds.map(String))].map((id) => new Types.ObjectId(id));
+    if (!ids.length) return;
+    const res = await this.players.updateMany({ _id: { $in: ids } }, { $inc: { writeSeq: 1 } }, { session, timestamps: false });
+    if (res.matchedCount === ids.length) return;
+    const found = new Set((await this.players.find({ _id: { $in: ids } }).select('_id').session(session).lean()).map((p) => p._id.toHexString()));
+    throw new NotFoundException(`Jugador ${ids.find((id) => !found.has(id.toHexString()))} no encontrado`);
+  }
+
   /** Escritura sobre el torneo o lo que cuelga de él: permiso y torneo no finalizado. */
   async tournament(id: string | Types.ObjectId, user: AuthUser, permission: Permission) {
     const tournament = await this.ownedTournament(id, user, permission);

@@ -11,7 +11,7 @@ import { RoundsService } from './rounds.service.js';
 import { ScheduleService } from './schedule.service.js';
 import { GenerateScheduleDto, RoundQueryDto, SaveRoundDto } from './dto/round.dto.js';
 import { Public } from '../auth/decorators/public.decorator.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { CurrentUser, Viewer } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
 @ApiTags('rounds')
@@ -25,16 +25,16 @@ export class RoundsController {
   @Public()
   @Get('rounds')
   @ApiOperation({ summary: 'Listar jornadas (paginado; filtro tournamentId)' })
-  list(@Query() query: RoundQueryDto) {
-    return this.service.list(query);
+  list(@Query() query: RoundQueryDto, @Viewer() viewer: AuthUser | null) {
+    return this.service.list(query, viewer);
   }
 
   @Public()
   @Get('tournaments/:id/rounds')
   @ApiTags('tournaments')
   @ApiOperation({ summary: 'Jornadas del torneo, en orden' })
-  ofTournament(@Param('id', IsObjectIdPipe) id: string) {
-    return this.service.ofTournament(id);
+  ofTournament(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.service.ofTournament(id, viewer);
   }
 
   @Put('tournaments/:id/rounds/:number')

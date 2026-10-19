@@ -23,4 +23,10 @@ describe('validateEnv', () => {
     expect(validateEnv(base).CLOUDINARY_CLOUD_NAME).toBeNull();
     expect(() => validateEnv({ ...base, CLOUDINARY_CLOUD_NAME: 'x' })).toThrow(/CLOUDINARY/);
   });
+
+  it('APP_TIME_ZONE: America/Cancun por defecto; rechaza una zona inexistente', () => {
+    expect(validateEnv(base).APP_TIME_ZONE).toBe('America/Cancun');
+    expect(validateEnv({ ...base, APP_TIME_ZONE: 'America/Mazatlan' }).APP_TIME_ZONE).toBe('America/Mazatlan');
+    expect(() => validateEnv({ ...base, APP_TIME_ZONE: 'Marte/Olympus' })).toThrow(/APP_TIME_ZONE/);
+  });
 });

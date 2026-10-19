@@ -12,10 +12,26 @@ const TEST_DB = 'football_app_test';
  * App real (mismos módulos, guards, pipes y filtros que producción) contra un replica set
  * MongoDB en memoria: las transacciones funcionan igual que con docker-compose.
  */
+/**
+ * Los archivos E2E corren en paralelo (en procesos distintos) y cada uno elige un puerto libre al
+ * azar: entre que se elige y que `mongod` lo abre, otro proceso puede tomarlo ("Port … already in
+ * use"). Se reintenta con otro puerto en lugar de perder el archivo entero. 5B (D5): además el
+ * paralelismo está acotado (vitest.config.e2e.ts) y el reintento tiene su prueba
+ * (test-infra.e2e-spec.ts), con `create` inyectable para provocar el choque.
+ */
+const createReplSet = () => MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } });
+
+export async function startReplSet(attempts = 4, create: () => Promise<MongoMemoryReplSet> = createReplSet): Promise<MongoMemoryReplSet> {
+  try {
+    return await create();
+  } catch (e) {
+    if (attempts > 1 && /already in use/i.test(String((e as Error)?.message ?? e))) return startReplSet(attempts - 1, create);
+    throw e;
+  }
+}
+
 export async function createTestApp(env: Record<string, string> = {}) {
-  const replSet = await MongoMemoryReplSet.create({
-    replSet: { count: 1, storageEngine: 'wiredTiger' },
-  });
+  const replSet = await startReplSet();
   Object.assign(process.env, {
     MONGODB_URI: replSet.getUri(TEST_DB),
     NODE_ENV: 'test',

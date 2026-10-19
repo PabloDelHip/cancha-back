@@ -128,9 +128,11 @@ export class TournamentsService {
     return this.findOwned(id, user);
   }
 
-  /** Listado público. */
-  async findAll(query: TournamentQueryDto) {
-    return this.list(query.status ? { status: query.status } : {}, query);
+  /** Listado público. 5B (D4): sin los borradores que el visitante no puede ver. */
+  async findAll(query: TournamentQueryDto, viewer: AuthUser | null = null) {
+    const filter: Record<string, unknown> = { _id: { $nin: await this.access.hiddenDrafts(viewer) } };
+    if (query.status) filter.status = query.status;
+    return this.list(filter, query);
   }
 
   /**
@@ -237,8 +239,7 @@ export class TournamentsService {
             );
           }
           await assertAssignmentsReleased(this.matches, tournamentId, dto.releaseAssignments, session);
-          await this.log.deleting(session, { userId: user.id }, { tournamentId }, MatchLogCause.FORMAT_CHANGED, { bulk: true });
-          await this.matches.deleteMany({ tournamentId }, { session });
+          await this.log.removeMatches(session, { userId: user.id }, { tournamentId }, MatchLogCause.FORMAT_CHANGED, { bulk: true });
           await this.rounds.deleteMany({ tournamentId }, { session });
         }
         // La regla de desempate decide llaves ya jugadas: cambiarla podría cambiar quién pasó.
@@ -255,7 +256,7 @@ export class TournamentsService {
         update.settings = next;
       }
       const updated = await this.tournaments
-        .findByIdAndUpdate(id, update, { new: true, runValidators: true, session })
+        .findByIdAndUpdate(id, update, { returnDocument: 'after', runValidators: true, session })
         .lean();
       return serialize(withCoverage(updated!), { includePrivateTournamentContact: true });
     });
@@ -307,7 +308,7 @@ export class TournamentsService {
         });
       }
       const tournament = await this.tournaments
-        .findByIdAndUpdate(id, { status: TournamentStatus.FINISHED }, { new: true, session })
+        .findByIdAndUpdate(id, { status: TournamentStatus.FINISHED }, { returnDocument: 'after', session })
         .lean();
       return { tournament: serialize(withCoverage(tournament!)), summary };
     });
@@ -340,7 +341,7 @@ export class TournamentsService {
   /** Cambio de estado condicionado al estado actual (evita carreras entre dos peticiones). */
   private async transition(id: string, from: TournamentStatus, to: TournamentStatus, session: ClientSession | null = null) {
     const updated = await this.tournaments
-      .findOneAndUpdate({ _id: id, status: from }, { status: to }, { new: true, session })
+      .findOneAndUpdate({ _id: id, status: from }, { status: to }, { returnDocument: 'after', session })
       .lean();
     if (!updated) throw new ConflictException('El estado del torneo cambió; recarga e inténtalo de nuevo');
     return serialize(withCoverage(updated));
@@ -404,10 +405,11 @@ export class TournamentsService {
       .sort((a, b) => a.team.name.localeCompare(b.team.name));
   }
 
-  async listEnrollments(query: EnrollmentQueryDto) {
-    const filter: Record<string, unknown> = {};
+  async listEnrollments(query: EnrollmentQueryDto, viewer: AuthUser | null = null) {
+    // 5B (D4): sin inscripciones de borradores que el visitante no puede ver.
+    const filter: Record<string, unknown> = { tournamentId: { $nin: await this.access.hiddenDrafts(viewer) } };
     if (query.tournamentId)
-      filter.tournamentId = toObjectId(query.tournamentId);
+      filter.tournamentId = { ...(filter.tournamentId as object), $eq: toObjectId(query.tournamentId) };
     if (query.teamId) filter.teamId = toObjectId(query.teamId);
     const [items, total] = await Promise.all([
       this.enrollments

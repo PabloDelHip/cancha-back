@@ -7,6 +7,7 @@ import { Tournament } from '../tournaments/schemas/tournament.schema.js';
 import { RoundQueryDto, SaveRoundDto } from './dto/round.dto.js';
 import { paginated, skipFor } from '../../common/dto/pagination.dto.js';
 import { serialize, toObjectId } from '../../common/utils/serialize.js';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
 import { Permission } from '../../common/authorization/permissions.js';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -22,18 +23,21 @@ export class RoundsService {
     @InjectModel(Match.name) private readonly matches: Model<Match>,
     @InjectModel(Tournament.name) private readonly tournaments: Model<Tournament>,
     private readonly ownership: OwnershipService,
+    private readonly access: TournamentAccessService,
   ) {}
 
   /** Jornadas de un torneo, en orden. Lectura pública. */
-  async ofTournament(tournamentId: string) {
-    if (!(await this.tournaments.exists({ _id: tournamentId })))
-      throw new NotFoundException(`Torneo ${tournamentId} no encontrado`);
+  async ofTournament(tournamentId: string, viewer: AuthUser | null = null) {
+    // 5B (D4): un borrador solo lo ven su propietario y colaboradores (404 como si no existiera).
+    await this.access.assertVisible(tournamentId, viewer);
     const rows = await this.rounds.find({ tournamentId: toObjectId(tournamentId) }).sort({ number: 1 }).lean();
     return serialize(rows);
   }
 
-  async list(query: RoundQueryDto) {
-    const filter = query.tournamentId ? { tournamentId: toObjectId(query.tournamentId) } : {};
+  async list(query: RoundQueryDto, viewer: AuthUser | null = null) {
+    // 5B (D4): sin jornadas de borradores que el visitante no puede ver.
+    const hidden = { $nin: await this.access.hiddenDrafts(viewer) };
+    const filter = { tournamentId: query.tournamentId ? { ...hidden, $eq: toObjectId(query.tournamentId) } : hidden };
     const [items, total] = await Promise.all([
       this.rounds.find(filter).sort({ tournamentId: 1, number: 1 }).skip(skipFor(query)).limit(query.limit).lean(),
       this.rounds.countDocuments(filter),
@@ -53,7 +57,7 @@ export class RoundsService {
         .findOneAndUpdate(
           { tournamentId: toObjectId(tournamentId), number },
           { $set: set, $setOnInsert: { tournamentId: toObjectId(tournamentId), number } },
-          { upsert: true, new: true, runValidators: true, session },
+          { upsert: true, returnDocument: 'after', runValidators: true, session },
         )
         .lean();
       return serialize(saved!);

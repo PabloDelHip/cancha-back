@@ -55,6 +55,14 @@ export class Player {
   @Prop({ required: true, select: false })
   searchName: string;
 
+  /**
+   * 5B — cerrojo lógico de la ficha (como `Tournament.writeSeq`): borrarla y crear algo que la
+   * referencia (participación, plantilla global, solicitud aprobada) lo incrementan dentro de su
+   * transacción, así no se cruzan (ver `lockPlayers`). Interno; los documentos viejos no lo tienen.
+   */
+  @Prop({ type: Number, default: 0, select: false })
+  writeSeq: number;
+
   createdAt: Date;
   updatedAt: Date;
 }

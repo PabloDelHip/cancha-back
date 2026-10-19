@@ -37,13 +37,17 @@ import {
   UpdateTournamentDto,
 } from './dto/tournament.dto.js';
 import { Public } from '../auth/decorators/public.decorator.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
+import { CurrentUser, Viewer } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
 @ApiTags('tournaments')
 @Controller()
 export class TournamentsController {
-  constructor(private readonly service: TournamentsService) {}
+  constructor(
+    private readonly service: TournamentsService,
+    private readonly access: TournamentAccessService,
+  ) {}
 
   @Get('admin/tournaments/:id')
   @ApiBearerAuth()
@@ -72,8 +76,8 @@ export class TournamentsController {
   @ApiOperation({
     summary: 'Listar torneos (público, paginado, filtro por estado)',
   })
-  findAll(@Query() query: TournamentQueryDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: TournamentQueryDto, @Viewer() viewer: AuthUser | null) {
+    return this.service.findAll(query, viewer);
   }
 
   @Get('admin/tournaments')
@@ -88,7 +92,8 @@ export class TournamentsController {
   @Public()
   @Get('tournaments/:id')
   @ApiNotFoundResponse({ description: 'Torneo no encontrado' })
-  findOne(@Param('id', IsObjectIdPipe) id: string) {
+  async findOne(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    await this.access.assertVisible(id, viewer);
     return this.service.findOne(id);
   }
 
@@ -148,8 +153,8 @@ export class TournamentsController {
   @Public()
   @Get('tournaments/:id/summary')
   @ApiOperation({ summary: 'Recuento de partidos por estado (total, finalizados, pendientes…)' })
-  async summary(@Param('id', IsObjectIdPipe) id: string) {
-    await this.service.findOne(id);
+  async summary(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    await this.access.assertVisible(id, viewer);
     return this.service.summary(id);
   }
 
@@ -170,7 +175,8 @@ export class TournamentsController {
   @Public()
   @Get('tournaments/:id/teams')
   @ApiOperation({ summary: 'Equipos inscritos en el torneo' })
-  listTeams(@Param('id', IsObjectIdPipe) id: string) {
+  async listTeams(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    await this.access.assertVisible(id, viewer);
     return this.service.listTeams(id);
   }
 
@@ -237,7 +243,7 @@ export class TournamentsController {
   @ApiOperation({
     summary: 'Listar inscripciones (paginado; filtros tournamentId, teamId)',
   })
-  listEnrollments(@Query() query: EnrollmentQueryDto) {
-    return this.service.listEnrollments(query);
+  listEnrollments(@Query() query: EnrollmentQueryDto, @Viewer() viewer: AuthUser | null) {
+    return this.service.listEnrollments(query, viewer);
   }
 }

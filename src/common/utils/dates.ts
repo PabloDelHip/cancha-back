@@ -9,12 +9,20 @@
 export const ISO_DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 export const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/** Fecha de hoy en formato `YYYY-MM-DD` (zona local del servidor). */
-export function todayISODate(now = new Date()): string {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+/**
+ * Zona horaria de las ligas: decide qué día es "hoy" (altas, bajas, plazos, movimientos). No se usa
+ * la del servidor: Cloud Run corre en UTC y de noche (hora de México) ya sería el día siguiente,
+ * así que un jugador dado de alta a las 23:00 quedaba inscrito "mañana" (bug 2026-10-18).
+ */
+export const DEFAULT_TIME_ZONE = 'America/Cancun';
+export const appTimeZone = () => process.env.APP_TIME_ZONE?.trim() || DEFAULT_TIME_ZONE;
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+/** Fecha de hoy en formato `YYYY-MM-DD` en la zona de las ligas (`APP_TIME_ZONE`). */
+export function todayISODate(now = new Date(), timeZone = appTimeZone()): string {
+  let f = formatters.get(timeZone);
+  if (!f) formatters.set(timeZone, (f = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })));
+  return f.format(now);
 }
 
 /** Comprueba además que la fecha exista (rechaza 2027-02-30). */

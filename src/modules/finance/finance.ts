@@ -99,3 +99,53 @@ export function entryShapeError(e: EntryInput): string | null {
   if (e.allowCredit && e.kind !== FinanceEntryKind.PAYMENT) return 'El saldo a favor solo se genera con un pago';
   return null;
 }
+
+/** Efecto con signo de un movimiento en el saldo (+ aumenta el adeudo); 0 si está anulado. */
+export const SIGN: Record<FinanceEntryKind, 1 | -1> = { CHARGE: 1, PAYMENT: -1, DISCOUNT: -1, REFUND: 1 };
+
+export interface RewriteError {
+  code: string;
+  message: string;
+  extra?: Record<string, unknown>;
+}
+
+/**
+ * 4D (F6) — ¿la anulación de `removeId` (y, en una corrección, el alta de `added`) deja la cuenta en
+ * un estado válido? Reglas, sobre el libro resultante:
+ * - un descuento nunca crea saldo a favor: lo descontado no supera lo cargado;
+ * - no se devuelve dinero que no se pagó: lo devuelto no supera lo pagado;
+ * - el reemplazo respeta los topes de 4B contra la cuenta ya sin el original (descuento ≤ adeudo,
+ *   devolución ≤ saldo a favor);
+ * - si el saldo a favor crece, hace falta la misma confirmación explícita que un pago excedente (F5).
+ */
+export function ledgerRewriteError(
+  ledger: (LedgerEntry & { _id?: unknown })[],
+  removeId: string,
+  added: { kind: FinanceEntryKind; amount: number } | null,
+  allowCredit: boolean,
+): RewriteError | null {
+  const before = totals(ledger);
+  const kept = ledger.filter((e) => String(e._id) !== removeId);
+  const middle = totals(kept);
+  if (added?.kind === FinanceEntryKind.DISCOUNT && added.amount > middle.due) {
+    return { code: 'DISCOUNT_EXCEEDS_BALANCE', message: 'El descuento no puede superar el adeudo pendiente', extra: { due: middle.due } };
+  }
+  if (added?.kind === FinanceEntryKind.REFUND && added.amount > middle.credit) {
+    return { code: 'REFUND_EXCEEDS_CREDIT', message: 'La devolución no puede superar el saldo a favor del equipo', extra: { credit: middle.credit } };
+  }
+  const after = totals(added ? [...kept, added] : kept);
+  if (after.discounted > after.charged) {
+    return { code: 'VOID_BREAKS_LEDGER', message: 'Quedarían descuentos sin un cargo que descontar: anula o corrige primero el descuento' };
+  }
+  if (after.refunded > after.paid) {
+    return { code: 'VOID_BREAKS_LEDGER', message: 'Quedaría una devolución de dinero que no se pagó: anula o corrige primero la devolución' };
+  }
+  if (after.credit > before.credit && !allowCredit) {
+    return {
+      code: 'CREDIT_CONFIRMATION_REQUIRED',
+      message: 'El cambio deja saldo a favor del equipo: confírmalo para continuar',
+      extra: { credit: before.credit, creditWouldBe: after.credit },
+    };
+  }
+  return null;
+}

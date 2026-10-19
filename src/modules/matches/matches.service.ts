@@ -70,10 +70,11 @@ export class MatchesService {
     private readonly incidents: MatchIncidentsService,
   ) {}
 
-  async findAll(query: MatchQueryDto) {
-    const filter: Record<string, unknown> = {};
+  async findAll(query: MatchQueryDto, viewer: AuthUser | null = null) {
+    // 5B (D4): sin partidos de borradores que el visitante no puede ver.
+    const filter: Record<string, unknown> = { tournamentId: { $nin: await this.access.hiddenDrafts(viewer) } };
     if (query.tournamentId)
-      filter.tournamentId = toObjectId(query.tournamentId);
+      filter.tournamentId = { ...(filter.tournamentId as object), $eq: toObjectId(query.tournamentId) };
     if (query.status) filter.status = query.status;
     if (query.teamId)
       filter.$or = [
@@ -93,14 +94,20 @@ export class MatchesService {
   }
 
   /** Todos los partidos de un torneo (acotado por naturaleza: no se pagina). */
-  async findByTournament(tournamentId: string) {
-    if (!(await this.tournaments.exists({ _id: tournamentId })))
-      throw new NotFoundException(`Torneo ${tournamentId} no encontrado`);
+  async findByTournament(tournamentId: string, viewer: AuthUser | null = null) {
+    // 5B (D4): un borrador solo lo ven su propietario y colaboradores (404 como si no existiera).
+    await this.access.assertVisible(tournamentId, viewer);
     const items = await this.matches
       .find({ tournamentId: toObjectId(tournamentId) })
       .sort({ round: 1, date: 1, time: 1 })
       .lean();
     return serialize(items.map(publicMatch));
+  }
+
+  /** 5B (D4): un partido de un borrador solo lo ven su propietario y colaboradores (404). */
+  async assertVisible(id: string, viewer: AuthUser | null) {
+    const match = await this.matches.findById(id).select('tournamentId').lean();
+    if (match && !(await this.access.isVisible(match.tournamentId, viewer))) throw new NotFoundException(`Partido ${id} no encontrado`);
   }
 
   async findOne(id: string) {
@@ -316,7 +323,7 @@ export class MatchesService {
         if (placement.createPhase) await this.tournaments.updateOne({ _id: toObjectId(tournamentId) }, { $push: { phases: placement.createPhase } }, { session });
       }
       const updated = await this.matches
-        .findByIdAndUpdate(id, update, { new: true, runValidators: true, session })
+        .findByIdAndUpdate(id, update, { returnDocument: 'after', runValidators: true, session })
         .lean();
       if (incidentsBefore) await this.discipline.checkMove(current, incidentsBefore, session, user);
       const decision = deciding ? DECISION[status as keyof typeof DECISION] : null;
@@ -395,8 +402,7 @@ export class MatchesService {
         );
       }
       await this.discipline.assertMatchUnreferenced(match._id, session);
-      await this.log.deleting(session, { userId: user.id }, { _id: match._id }, MatchLogCause.MANUAL);
-      await this.matches.deleteOne({ _id: match._id }, { session });
+      await this.log.removeMatches(session, { userId: user.id }, { _id: match._id }, MatchLogCause.MANUAL);
     });
   }
 

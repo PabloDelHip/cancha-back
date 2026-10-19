@@ -19,6 +19,8 @@ export function configureApp(
   app.enableCors({
     origin: options.frontendUrl.split(',').map((o) => o.trim()),
     credentials: true,
+    // 4D: el front lee el nombre del CSV descargado.
+    exposedHeaders: ['Content-Disposition'],
   });
   app.useGlobalPipes(
     new ValidationPipe({

@@ -17,6 +17,8 @@ import { TournamentsService } from '../src/modules/tournaments/tournaments.servi
 let ctx: TestApp;
 let http: Server;
 const api = () => request(http);
+// 5B (D4): un torneo DRAFT solo lo ve su propietario (A): lo que se lee de un borrador, se lee como él.
+const owner = () => authed(http, A.token);
 
 type Org = Awaited<ReturnType<typeof registerOrganizer>>;
 let A: Org;
@@ -72,7 +74,7 @@ const goal = (playerId: string, teamId: string, goals = 1) => ({
 const result = (matchId: string, homeScore: number, awayScore: number, playerStats: unknown[] = [], extra = {}) =>
   as(A).put(`/api/matches/${matchId}/result`).send({ homeScore, awayScore, playerStats, ...extra });
 const matchesOf = async (tournamentId: string) =>
-  (await api().get(`/api/tournaments/${tournamentId}/matches`).expect(200)).body as {
+  (await owner().get(`/api/tournaments/${tournamentId}/matches`).expect(200)).body as {
     id: string;
     round: number;
     homeTeamId: string;
@@ -81,9 +83,9 @@ const matchesOf = async (tournamentId: string) =>
     homeScore: number | null;
   }[];
 const statsOf = async (tournamentId: string) =>
-  (await api().get(`/api/player-match-stats?tournamentId=${tournamentId}`).expect(200)).body.meta.total as number;
+  (await owner().get(`/api/player-match-stats?tournamentId=${tournamentId}`).expect(200)).body.meta.total as number;
 const statusOf = async (tournamentId: string) =>
-  (await api().get(`/api/tournaments/${tournamentId}`).expect(200)).body.status as string;
+  (await owner().get(`/api/tournaments/${tournamentId}`).expect(200)).body.status as string;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -156,8 +158,8 @@ describe('DRAFT: sin actividad deportiva (requests directos a la API)', () => {
 
   it('no se crean ni modifican PlayerMatchStats', async () => {
     expect(await statsOf(x.id)).toBe(0);
-    expect((await api().get(`/api/matches/${x.match}/stats`).expect(200)).body).toEqual([]);
-    expect((await api().get(`/api/players/${x.scorer}/stats`).expect(200)).body.totals).toMatchObject({
+    expect((await owner().get(`/api/matches/${x.match}/stats`).expect(200)).body).toEqual([]);
+    expect((await owner().get(`/api/players/${x.scorer}/stats`).expect(200)).body.totals).toMatchObject({
       matchesPlayed: 0,
       goals: 0,
     });
@@ -197,10 +199,10 @@ describe('DRAFT: sin actividad deportiva (requests directos a la API)', () => {
     const matches = await matchesOf(x.id);
     expect(matches).toHaveLength(3);
     expect(matches.every((m) => m.status === 'SCHEDULED' && m.homeScore === null)).toBe(true);
-    const table = (await api().get(`/api/tournaments/${x.id}/standings`).expect(200)).body;
+    const table = (await owner().get(`/api/tournaments/${x.id}/standings`).expect(200)).body;
     expect(table.every((r: { played: number }) => r.played === 0)).toBe(true);
-    expect((await api().get(`/api/tournaments/${x.id}/top-scorers`).expect(200)).body).toEqual([]);
-    const summary = (await api().get(`/api/tournaments/${x.id}/summary`).expect(200)).body;
+    expect((await owner().get(`/api/tournaments/${x.id}/top-scorers`).expect(200)).body).toEqual([]);
+    const summary = (await owner().get(`/api/tournaments/${x.id}/summary`).expect(200)).body;
     expect(summary).toMatchObject({ total: 3, scheduled: 3, live: 0, finished: 0 });
   });
 
@@ -223,10 +225,10 @@ describe('DRAFT: sin actividad deportiva (requests directos a la API)', () => {
     const live = await newMatch(x.id, 7, x.home, x.third, { status: 'LIVE' }).expect(201);
     expect(live.body.status).toBe('LIVE');
 
-    const table = (await api().get(`/api/tournaments/${x.id}/standings`).expect(200)).body;
+    const table = (await owner().get(`/api/tournaments/${x.id}/standings`).expect(200)).body;
     // puntuación configurada en DRAFT (2/1/0)
     expect(table[0]).toMatchObject({ teamId: x.home, played: 1, wins: 1, points: 2 });
-    const scorers = (await api().get(`/api/tournaments/${x.id}/top-scorers`).expect(200)).body;
+    const scorers = (await owner().get(`/api/tournaments/${x.id}/top-scorers`).expect(200)).body;
     expect(scorers[0]).toMatchObject({ playerId: x.scorer, goals: 2 });
   });
 });

@@ -2,6 +2,8 @@
  * Validación de variables de entorno al arrancar.
  * Falla rápido con un mensaje claro en lugar de errores crípticos más tarde.
  */
+import { DEFAULT_TIME_ZONE } from '../common/utils/dates.js';
+
 export interface EnvConfig {
   PORT: number;
   MONGODB_URI: string;
@@ -31,6 +33,8 @@ export interface EnvConfig {
   CLOUDINARY_API_SECRET: string | null;
   /** API de Cloudinary (por defecto la real). Solo se cambia para pruebas con un almacenamiento simulado. */
   CLOUDINARY_API_URL: string;
+  /** Zona horaria IANA de las ligas (qué día es "hoy"); por defecto America/Cancun. Ver `todayISODate`. */
+  APP_TIME_ZONE: string;
 }
 
 /** Duraciones estilo "15m", "7d", "3600s" o segundos. */
@@ -111,6 +115,13 @@ export function validateEnv(raw: Record<string, unknown>): EnvConfig {
   if (nodeEnv === 'production' && cloudinaryApi !== 'https://api.cloudinary.com')
     errors.push('CLOUDINARY_API_URL solo puede cambiarse fuera de producción');
 
+  const timeZone = str('APP_TIME_ZONE', DEFAULT_TIME_ZONE);
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone });
+  } catch {
+    errors.push('APP_TIME_ZONE debe ser una zona horaria IANA válida (p. ej. America/Cancun)');
+  }
+
   if (errors.length)
     throw new Error(`Configuración inválida:\n - ${errors.join('\n - ')}`);
 
@@ -131,6 +142,7 @@ export function validateEnv(raw: Record<string, unknown>): EnvConfig {
     CLOUDINARY_API_KEY: cloudinary[1],
     CLOUDINARY_API_SECRET: cloudinary[2],
     CLOUDINARY_API_URL: cloudinaryApi,
+    APP_TIME_ZONE: timeZone,
   };
 }
 

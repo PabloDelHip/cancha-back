@@ -11,6 +11,8 @@ import { authed, createTestApp, registerOrganizer, type Server, type TestApp } f
 let ctx: TestApp;
 let http: Server;
 const api = () => request(http);
+// 5B (D4): un torneo DRAFT solo lo ve su propietario (A): lo que se lee de un borrador, se lee como él.
+const owner = () => authed(http, A.token);
 
 type Org = Awaited<ReturnType<typeof registerOrganizer>>;
 let A: Org;
@@ -83,7 +85,7 @@ afterAll(async () => ctx?.close());
 describe('Ciclo de vida DRAFT → ACTIVE → FINISHED', () => {
   it('un torneo nace en DRAFT con configuración de liga 3/1/0', async () => {
     const id = await tournament(A);
-    const res = await api().get(`/api/tournaments/${id}`).expect(200);
+    const res = await owner().get(`/api/tournaments/${id}`).expect(200);
     expect(res.body.status).toBe('DRAFT');
     expect(res.body.settings).toEqual({
       system: 'LEAGUE',
@@ -110,7 +112,7 @@ describe('Ciclo de vida DRAFT → ACTIVE → FINISHED', () => {
     const id = await tournament(A);
     await as(A).patch(`/api/tournaments/${id}`).send({ status: 'ACTIVE' }).expect(400);
     await as(A).patch(`/api/tournaments/${id}`).send({ status: 'FINISHED' }).expect(400);
-    expect((await api().get(`/api/tournaments/${id}`)).body.status).toBe('DRAFT');
+    expect((await owner().get(`/api/tournaments/${id}`)).body.status).toBe('DRAFT');
   });
 
   it('DRAFT → ACTIVE funciona; iniciar dos veces o finalizar un borrador se rechaza', async () => {
@@ -132,7 +134,7 @@ describe('Ciclo de vida DRAFT → ACTIVE → FINISHED', () => {
 
     const refused = await as(A).post(`/api/tournaments/${id}/finish`).send({}).expect(409);
     expect(refused.body.summary).toMatchObject({ total: 3, finished: 1, scheduled: 1, postponed: 1, pending: 2 });
-    expect((await api().get(`/api/tournaments/${id}`)).body.status).toBe('ACTIVE');
+    expect((await owner().get(`/api/tournaments/${id}`)).body.status).toBe('ACTIVE');
 
     const done = await as(A).post(`/api/tournaments/${id}/finish`).send({ allowPendingMatches: true }).expect(200);
     expect(done.body.tournament.status).toBe('FINISHED');
@@ -213,9 +215,9 @@ describe('Jornadas', () => {
     expect(created.body).toMatchObject({ number: 1, name: null, date: null, tournamentId: id });
     const renamed = await as(A).put(`/api/tournaments/${id}/rounds/2`).send({ name: 'Jornada 2 · Clásico' }).expect(200);
     expect(renamed.body).toMatchObject({ number: 2, name: 'Jornada 2 · Clásico', date: '2027-02-13' });
-    const list = await api().get(`/api/tournaments/${id}/rounds`).expect(200);
+    const list = await owner().get(`/api/tournaments/${id}/rounds`).expect(200);
     expect(list.body.map((r: { number: number }) => r.number)).toEqual([1, 2]);
-    const paged = await api().get(`/api/rounds?tournamentId=${id}`).expect(200);
+    const paged = await owner().get(`/api/rounds?tournamentId=${id}`).expect(200);
     expect(paged.body.meta.total).toBe(2);
   });
 
@@ -227,7 +229,7 @@ describe('Jornadas', () => {
 
   it('programar un partido crea (o reutiliza) el registro de su jornada', async () => {
     await match(A, id, 5, t[0], t[1]);
-    const list = await api().get(`/api/tournaments/${id}/rounds`).expect(200);
+    const list = await owner().get(`/api/tournaments/${id}/rounds`).expect(200);
     expect(list.body.map((r: { number: number }) => r.number)).toEqual([1, 2, 5]);
   });
 
@@ -255,7 +257,7 @@ describe('Jornadas', () => {
     await as(A).delete(`/api/tournaments/${id}/rounds/5`).expect(409);
     await as(A).delete(`/api/tournaments/${id}/rounds/1`).expect(204);
     await as(A).delete(`/api/tournaments/${id}/rounds/1`).expect(404);
-    const matches = await api().get(`/api/tournaments/${id}/matches`).expect(200);
+    const matches = await owner().get(`/api/tournaments/${id}/matches`).expect(200);
     expect(matches.body.filter((m: { round: number }) => m.round === 5)).toHaveLength(3);
   });
 
@@ -263,9 +265,9 @@ describe('Jornadas', () => {
     await as(B).put(`/api/tournaments/${id}/rounds/9`).send({ name: 'Mía' }).expect(403);
     await as(B).delete(`/api/tournaments/${id}/rounds/2`).expect(403);
     await newMatch(B, id, 8, t[0], t[1]).expect(403);
-    const m = (await api().get(`/api/tournaments/${id}/matches`)).body[0];
+    const m = (await owner().get(`/api/tournaments/${id}/matches`)).body[0];
     await as(B).patch(`/api/matches/${m.id}`).send({ reason: 'Motivo de prueba', round: 9 }).expect(403);
-    expect((await api().get(`/api/tournaments/${id}/rounds`)).body.map((r: { number: number }) => r.number)).not.toContain(9);
+    expect((await owner().get(`/api/tournaments/${id}/rounds`)).body.map((r: { number: number }) => r.number)).not.toContain(9);
   });
 });
 
@@ -307,7 +309,7 @@ describe('Generación de calendario (POST /tournaments/:id/schedule)', () => {
     ]);
     assertLeague(res.body.matches, t, 1);
     expect(res.body.matches.filter((m: ApiMatch) => m.round === 1).map((m: ApiMatch) => m.time)).toEqual(['19:00', '20:00']);
-    expect((await api().get(`/api/tournaments/${id}/rounds`)).body).toHaveLength(3);
+    expect((await owner().get(`/api/tournaments/${id}/rounds`)).body).toHaveLength(3);
   });
 
   it('5 equipos, ida y vuelta: 10 jornadas con un descanso cada una, cruces invertidos', async () => {
@@ -325,10 +327,10 @@ describe('Generación de calendario (POST /tournaments/:id/schedule)', () => {
     expect(refused.body.message).toMatch(/replaceExisting/);
     const second = await schedule(A, id, { legs: 2, replaceExisting: true }).expect(201);
     expect(second.body.replaced).toBe(6);
-    const now = (await api().get(`/api/tournaments/${id}/matches`)).body as ApiMatch[];
+    const now = (await owner().get(`/api/tournaments/${id}/matches`)).body as ApiMatch[];
     assertLeague(now, t, 2);
     expect(now.some((m) => first.some((f) => f.id === m.id))).toBe(false);
-    expect((await api().get(`/api/tournaments/${id}/rounds`)).body).toHaveLength(6);
+    expect((await owner().get(`/api/tournaments/${id}/rounds`)).body).toHaveLength(6);
   });
 
   it('nunca regenera un calendario con partidos jugados o en juego', async () => {
@@ -339,14 +341,14 @@ describe('Generación de calendario (POST /tournaments/:id/schedule)', () => {
     await schedule(A, id, { legs: 1, replaceExisting: true }).expect(409);
     await result(A, matches[0].id, 1, 0).expect(200);
     await schedule(A, id, { legs: 1, replaceExisting: true }).expect(409);
-    expect((await api().get(`/api/tournaments/${id}/matches`)).body).toHaveLength(6);
+    expect((await owner().get(`/api/tournaments/${id}/matches`)).body).toHaveLength(6);
   });
 
   it('es atómica: si falla a mitad, el calendario anterior queda intacto', async () => {
     const id = await tournament(A);
     await teams(A, id, 4);
     const before = ((await schedule(A, id, { legs: 1 }).expect(201)).body.matches as ApiMatch[]).map((m) => m.id).sort();
-    const roundsBefore = (await api().get(`/api/tournaments/${id}/rounds`)).body;
+    const roundsBefore = (await owner().get(`/api/tournaments/${id}/rounds`)).body;
 
     // Falla la inserción de partidos DESPUÉS de borrar el calendario viejo y crear las jornadas nuevas.
     const Match = ctx.app.get<Model<unknown>>(getModelToken('Match'));
@@ -354,9 +356,9 @@ describe('Generación de calendario (POST /tournaments/:id/schedule)', () => {
     await schedule(A, id, { legs: 2, replaceExisting: true }).expect(500);
     spy.mockRestore();
 
-    const after = ((await api().get(`/api/tournaments/${id}/matches`)).body as ApiMatch[]).map((m) => m.id).sort();
+    const after = ((await owner().get(`/api/tournaments/${id}/matches`)).body as ApiMatch[]).map((m) => m.id).sort();
     expect(after).toEqual(before);
-    expect((await api().get(`/api/tournaments/${id}/rounds`)).body).toEqual(roundsBefore);
+    expect((await owner().get(`/api/tournaments/${id}/rounds`)).body).toEqual(roundsBefore);
   });
 
   it('valida equipos suficientes y ownership', async () => {

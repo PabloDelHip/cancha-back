@@ -11,7 +11,7 @@
 import { Types } from 'mongoose';
 import { CompetitionSystem, MatchStatus, PhaseType } from '../../common/enums/index.js';
 import { addDays, addMinutes, generateRoundRobin } from '../rounds/round-robin.js';
-import { buildBracket, knockoutRoundNumber, phaseRounds, reconcile, roundName, roundsOf, nextPowerOfTwo } from './bracket.js';
+import { buildBracket, knockoutRoundNumber, phaseRounds, reconcile, roundName, nextPowerOfTwo } from './bracket.js';
 import { groupSizes, phasesOf } from './formats.js';
 import type { KnockoutSeed, MatchStage, PhaseSchedule, TournamentPhase } from './types.js';
 

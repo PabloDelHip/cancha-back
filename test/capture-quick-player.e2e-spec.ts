@@ -3,6 +3,10 @@
  * registrado. El front reutiliza los endpoints de siempre (crear jugador con revisión de duplicados,
  * inscribirlo en el equipo del torneo, capturar); esta prueba fija ese flujo y sus permisos.
  */
+import { getConnectionToken } from '@nestjs/mongoose';
+import type { Connection } from 'mongoose';
+import { Types } from 'mongoose';
+import { todayISODate } from '../src/common/utils/dates.js';
 import { authed, createTestApp, registerOrganizer, type Server, type TestApp } from './utils/test-app.js';
 
 let ctx: TestApp;
@@ -48,4 +52,26 @@ it('solo nombre y apellidos: se crea, se inscribe en el equipo y cuenta en la ca
   await as(SCO).post(`/api/invitations/${inv.token}/accept`).expect(200);
   const other = (await as(SCO).post('/api/players').send({ firstName: 'Otro', lastName: 'Anotado', position: 'MIDFIELDER', birthDate: null }).expect(201)).body;
   await as(SCO).put(`/api/tournaments/${t}/players/${other.id}`).send({ teamId: home }).expect(403);
+});
+
+// 2026-10-18 (pedido del usuario): el alta rápida inscribe con la fecha del partido y un motivo
+// automático; el organizador no escribe nada. Partido de hoy: misma carga, sin excepción.
+it('alta desde el partido: fecha del partido y motivo automático; cuenta en ese partido', async () => {
+  const db = ctx.app.get<Connection>(getConnectionToken());
+  const t = (await as(O).post('/api/tournaments').send({ name: 'Alta automática', format: 'FOOTBALL_7', category: 'Libre', startDate: '2026-01-01', status: 'ACTIVE' }).expect(201)).body.id;
+  const [home, away] = [(await as(O).post('/api/teams').send({ name: 'Tigres Auto' }).expect(201)).body.id, (await as(O).post('/api/teams').send({ name: 'Chivas Auto' }).expect(201)).body.id];
+  for (const id of [home, away]) await as(O).post(`/api/tournaments/${t}/teams/${id}`).expect(201);
+  const today = todayISODate();
+  for (const date of ['2026-09-12', today]) {
+    const m = (await as(O).post('/api/matches').send({ tournamentId: t, round: date === today ? 2 : 1, homeTeamId: home, awayTeamId: away, date, time: '18:30' }).expect(201)).body.id;
+    const p = (await as(O).post('/api/players').send({ firstName: 'Auto', lastName: `Alta ${date}`, position: 'MIDFIELDER', confirmNew: true }).expect(201)).body.id;
+    // Lo que envía QuickAddPlayerDialog.
+    const reason = `Alta desde la captura del partido del ${date}: jugó ese partido.`;
+    await as(O).put(`/api/tournaments/${t}/players/${p}`).send({ teamId: home, startDate: date, retroactiveReason: reason }).expect(200);
+    await as(O).put(`/api/matches/${m}/result`).send({ homeScore: 0, awayScore: 0, playerStats: [{ playerId: p, teamId: home, goals: 0, assists: 0, yellowCards: 0, redCards: 0, sendOff: null }] }).expect(200);
+    const row = await db.collection('team_memberships').findOne({ tournamentId: new Types.ObjectId(t), playerId: new Types.ObjectId(p) });
+    expect(row).toMatchObject({ startDate: date, registeredAt: today });
+    const retro = row!.audit.filter((a: { action: string }) => a.action === 'RETROACTIVE');
+    expect(retro).toEqual(date === today ? [] : [expect.objectContaining({ reason, details: { from: today, to: date } })]);
+  }
 });

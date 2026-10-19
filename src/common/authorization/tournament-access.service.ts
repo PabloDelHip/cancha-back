@@ -4,7 +4,8 @@ import { Model, Types } from 'mongoose';
 import type { ClientSession } from 'mongoose';
 import { Tournament } from '../../modules/tournaments/schemas/tournament.schema.js';
 import { TournamentMember } from '../../modules/tournaments/schemas/tournament-member.schema.js';
-import { TournamentMemberStatus } from '../enums/index.js';
+import { TournamentMemberStatus, TournamentStatus } from '../enums/index.js';
+import type { AuthUser } from '../../modules/auth/auth.types.js';
 import { can, type AccessRole, type Permission } from './permissions.js';
 
 
@@ -61,5 +62,35 @@ export class TournamentAccessService {
     const out = new Map<string, AccessRole>(member.map((m) => [m.tournamentId.toHexString(), m.role]));
     for (const id of owned) out.set(id.toHexString(), 'OWNER');
     return out;
+  }
+
+  // ─── 5B (D4): visibilidad pública de los torneos en borrador ───────────────
+
+  /**
+   * Torneos en BORRADOR que este visitante no puede ver (todos, si es anónimo). Un borrador solo lo
+   * ven su propietario y sus colaboradores activos; iniciado (ACTIVE) o finalizado es público. Las
+   * lecturas públicas excluyen estos ids (`$nin`); son pocos (los borradores en preparación).
+   */
+  async hiddenDrafts(viewer: AuthUser | null): Promise<Types.ObjectId[]> {
+    const drafts = await this.tournaments.find({ status: TournamentStatus.DRAFT }).select('_id organizerId').lean();
+    if (!viewer || !drafts.length) return drafts.map((t) => t._id);
+    const me = new Types.ObjectId(viewer.id);
+    const member = new Set(
+      (await this.members.distinct('tournamentId', { userId: me, status: TournamentMemberStatus.ACTIVE, tournamentId: { $in: drafts.map((t) => t._id) } })).map(String),
+    );
+    return drafts.filter((t) => !t.organizerId.equals(me) && !member.has(String(t._id))).map((t) => t._id);
+  }
+
+  /** ¿Puede este visitante ver el torneo? (existe y, si es borrador, es propietario o colaborador). */
+  async isVisible(tournamentId: string | Types.ObjectId, viewer: AuthUser | null): Promise<boolean> {
+    const t = await this.tournaments.findById(tournamentId).select('status organizerId').lean();
+    if (!t) return false;
+    if (t.status !== TournamentStatus.DRAFT) return true;
+    return viewer ? (await this.roleIn(t, viewer.id)) !== null : false;
+  }
+
+  /** 404 (como si no existiera, sin revelar que hay un borrador) si el visitante no puede verlo. */
+  async assertVisible(tournamentId: string | Types.ObjectId, viewer: AuthUser | null) {
+    if (!(await this.isVisible(tournamentId, viewer))) throw new NotFoundException(`Torneo ${String(tournamentId)} no encontrado`);
   }
 }

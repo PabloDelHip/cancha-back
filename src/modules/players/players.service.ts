@@ -4,8 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import type { Connection } from 'mongoose';
 import { normalizeSearch, Player, playerSearchName } from './schemas/player.schema.js';
 import { PlayerDuplicatesService } from './player-duplicates.service.js';
 import { TeamMembership } from './schemas/team-membership.schema.js';
@@ -25,7 +26,12 @@ import { escapeRegex } from '../../common/utils/regex.js';
 import { todayISODate } from '../../common/utils/dates.js';
 import { MembershipsService } from './memberships.service.js';
 import { publicPlayer } from '../../common/utils/public.js';
-import { TeamRosterStatus, TournamentStatus } from '../../common/enums/index.js';
+import { RegistrationRequestStatus, TeamRosterStatus, TournamentStatus } from '../../common/enums/index.js';
+import { Sanction } from '../discipline/schemas/sanction.schema.js';
+import { MatchSheet } from '../match-sheet/schemas/match-sheet.schema.js';
+import { FinanceEntry } from '../finance/schemas/finance-entry.schema.js';
+import { RegistrationRequest } from '../registration/schemas/registration-request.schema.js';
+import { RegistrationDraft } from '../registration/schemas/registration-draft.schema.js';
 import { TeamRoster } from '../teams/schemas/team-roster.schema.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
 import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
@@ -49,6 +55,12 @@ export class PlayersService {
     private readonly tournaments: Model<Tournament>,
     @InjectModel(PlayerBlock.name) private readonly blocks: Model<PlayerBlock>,
     @InjectModel(RemovedEnrollment.name) private readonly removed: Model<RemovedEnrollment>,
+    @InjectModel(Sanction.name) private readonly sanctions: Model<Sanction>,
+    @InjectModel(MatchSheet.name) private readonly sheets: Model<MatchSheet>,
+    @InjectModel(FinanceEntry.name) private readonly finance: Model<FinanceEntry>,
+    @InjectModel(RegistrationRequest.name) private readonly requests: Model<RegistrationRequest>,
+    @InjectModel(RegistrationDraft.name) private readonly drafts: Model<RegistrationDraft>,
+    @InjectConnection() private readonly connection: Connection,
     private readonly membershipsService: MembershipsService,
     private readonly ownership: OwnershipService,
     private readonly tournamentAccess: TournamentAccessService,
@@ -133,10 +145,10 @@ export class PlayersService {
    * los torneos. Actual = participación activa en un torneo NO finalizado; puede haber varias
    * (torneos simultáneos). El perfil completo está en /players/:id/profile.
    */
-  async findOne(id: string) {
+  async findOne(id: string, viewer: AuthUser | null = null) {
     const player = await this.players.findById(id).lean();
     if (!player) throw new NotFoundException(`Jugador ${id} no encontrado`);
-    const memberships = await this.membershipsService.playerHistory(id);
+    const memberships = await this.membershipsService.playerHistory(id, viewer);
     return {
       ...publicPlayer(player),
       currentParticipations: memberships.filter(
@@ -169,7 +181,7 @@ export class PlayersService {
     // Una foto subida a Cloudinary que se sustituye por otra URL (o null) deja de ser nuestra: se borra.
     const replacesUpload = dto.photoUrl !== undefined && dto.photoUrl !== current.photoUrl;
     const updated = await this.players
-      .findByIdAndUpdate(id, { ...dto, searchName, ...(replacesUpload ? { photoPublicId: null } : {}) }, { new: true, runValidators: true })
+      .findByIdAndUpdate(id, { ...dto, searchName, ...(replacesUpload ? { photoPublicId: null } : {}) }, { returnDocument: 'after', runValidators: true })
       .lean();
     if (replacesUpload) await this.cloudinary.destroy(current.photoPublicId);
     return serialize(updated!);
@@ -192,36 +204,64 @@ export class PlayersService {
   /**
    * Solo se borra una ficha sin historia: sin partidos y sin participaciones en torneos
    * ajenos (borrarla destruiría la plantilla de otro organizador).
+   *
+   * 5B (D1): tampoco con sanciones, alineaciones, movimientos financieros (aunque estén anulados)
+   * ni solicitudes de inscripción pendientes → 409 PLAYER_HAS_HISTORY. Todo en UNA transacción que
+   * escribe primero la ficha (`lockPlayers`, el mismo cerrojo que toman sus altas) y los torneos
+   * donde figura (`lockAny`, el que toman sanciones, fichas técnicas y multas): nada que la
+   * referencie puede crearse a la vez y quedar huérfano.
    */
   async remove(id: string, user: AuthUser) {
     const current = await this.ownership.player(id, user);
     const playerId = toObjectId(id);
-    if (await this.stats.exists({ playerId })) {
-      throw new ConflictException('El jugador tiene partidos registrados y no puede eliminarse');
-    }
-    const tournamentIds: Types.ObjectId[] = await this.memberships.distinct('tournamentId', { playerId });
-    // Un torneo finalizado es historial: su plantilla no se altera ni borrando la ficha.
-    if (await this.tournaments.exists({ _id: { $in: tournamentIds }, status: TournamentStatus.FINISHED })) {
-      throw new ConflictException('El jugador forma parte de un torneo finalizado y no puede eliminarse');
-    }
-    const foreign = await this.tournaments.exists({
-      _id: { $in: tournamentIds },
-      organizerId: { $ne: toObjectId(user.id) },
+    await this.connection.transaction(async (session) => {
+      await this.ownership.lockPlayers([playerId], session);
+      if (await this.stats.exists({ playerId }).session(session)) {
+        throw new ConflictException('El jugador tiene partidos registrados y no puede eliminarse');
+      }
+      const tournamentIds: Types.ObjectId[] = await this.memberships.distinct('tournamentId', { playerId }).session(session);
+      // Un torneo finalizado es historial: su plantilla no se altera ni borrando la ficha.
+      if (await this.tournaments.exists({ _id: { $in: tournamentIds }, status: TournamentStatus.FINISHED }).session(session)) {
+        throw new ConflictException('El jugador forma parte de un torneo finalizado y no puede eliminarse');
+      }
+      if (await this.tournaments.exists({ _id: { $in: tournamentIds }, organizerId: { $ne: toObjectId(user.id) } }).session(session)) {
+        throw new ConflictException('El jugador participa en torneos de otros organizadores y no puede eliminarse');
+      }
+      // Pertenece a la plantilla GLOBAL de algún equipo: borrar la ficha dejaría ese equipo sin
+      // explicación. Primero deben retirarlo (sus OWNER/MANAGER).
+      if (await this.rosters.exists({ playerId, status: TeamRosterStatus.ACTIVE }).session(session)) {
+        throw new ConflictException('El jugador está en la plantilla de un equipo y no puede eliminarse');
+      }
+      // Cerrojo de los torneos donde figura (también las copias de equipos quitados, que admiten multas).
+      const copies: Types.ObjectId[] = await this.removed.distinct('tournamentId', { 'memberships.playerId': playerId }).session(session);
+      for (const tid of new Map([...tournamentIds, ...copies].map((t) => [t.toHexString(), t])).values()) {
+        await this.ownership.lockAny(tid, session);
+      }
+      const history = [
+        [await this.sanctions.exists({ playerId }).session(session), 'sanciones'],
+        [await this.sheets.exists({ $or: [{ 'teams.players.playerId': playerId }, { 'teams.substitutions.inPlayerId': playerId }, { 'teams.substitutions.outPlayerId': playerId }] }).session(session), 'alineaciones en fichas técnicas'],
+        [await this.finance.exists({ playerId }).session(session), 'multas u otros movimientos financieros'],
+        [await this.requests.exists({ playerIds: playerId, status: RegistrationRequestStatus.PENDING }).session(session), 'solicitudes de inscripción pendientes'],
+      ]
+        .filter(([found]) => found)
+        .map(([, what]) => what as string);
+      if (history.length) {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'PLAYER_HAS_HISTORY',
+          message: `El jugador tiene historial que debe conservarse (${history.join(', ')}) y no puede eliminarse`,
+          history,
+        });
+      }
+      await this.memberships.deleteMany({ playerId }, { session });
+      // 3E: sin la ficha no quedan bloqueos ni copias de participaciones apuntando a ella.
+      await this.blocks.deleteMany({ playerId }, { session });
+      await this.removed.updateMany({ 'memberships.playerId': playerId }, { $pull: { memberships: { playerId } } }, { session });
+      await this.rosters.deleteMany({ playerId }, { session });
+      // Una inscripción a medias no es historia: el borrador solo deja de proponerla.
+      await this.drafts.updateMany({ playerIds: playerId }, { $pull: { playerIds: playerId } }, { session });
+      await this.players.deleteOne({ _id: playerId }, { session });
     });
-    if (foreign) {
-      throw new ConflictException('El jugador participa en torneos de otros organizadores y no puede eliminarse');
-    }
-    // Pertenece a la plantilla GLOBAL de algún equipo: borrar la ficha dejaría ese equipo sin
-    // explicación. Primero deben retirarlo (sus OWNER/MANAGER).
-    if (await this.rosters.exists({ playerId, status: TeamRosterStatus.ACTIVE })) {
-      throw new ConflictException('El jugador está en la plantilla de un equipo y no puede eliminarse');
-    }
-    await this.memberships.deleteMany({ playerId });
-    // 3E: sin la ficha no quedan bloqueos ni copias de participaciones apuntando a ella.
-    await this.blocks.deleteMany({ playerId });
-    await this.removed.updateMany({ 'memberships.playerId': playerId }, { $pull: { memberships: { playerId } } });
-    await this.rosters.deleteMany({ playerId });
-    await this.players.deleteOne({ _id: playerId });
     await this.cloudinary.destroy(current.photoPublicId);
   }
 }

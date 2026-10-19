@@ -84,11 +84,12 @@ export class MembershipsService {
     private readonly access: TournamentAccessService,
   ) {}
 
-  async list(query: MembershipQueryDto) {
-    const filter: Record<string, unknown> = {};
+  async list(query: MembershipQueryDto, viewer: AuthUser | null = null) {
+    // 5B (D4): sin participaciones de borradores que el visitante no puede ver.
+    const filter: Record<string, unknown> = { tournamentId: { $nin: await this.access.hiddenDrafts(viewer) } };
     if (query.playerId) filter.playerId = toObjectId(query.playerId);
     if (query.teamId) filter.teamId = toObjectId(query.teamId);
-    if (query.tournamentId) filter.tournamentId = toObjectId(query.tournamentId);
+    if (query.tournamentId) filter.tournamentId = { ...(filter.tournamentId as object), $eq: toObjectId(query.tournamentId) };
     if (query.active !== undefined) filter.active = query.active;
     const [items, total] = await Promise.all([
       this.memberships
@@ -105,15 +106,15 @@ export class MembershipsService {
   }
 
   /** Historial del jugador en todos los torneos (más reciente primero), con equipo y torneo. */
-  async playerHistory(playerId: string) {
+  async playerHistory(playerId: string, viewer: AuthUser | null) {
     await this.assertPlayer(playerId);
-    const rows = await this.populated({ playerId: toObjectId(playerId) }, { startDate: -1, active: -1 });
+    const rows = await this.populated({ playerId: toObjectId(playerId), tournamentId: { $nin: await this.access.hiddenDrafts(viewer) } }, { startDate: -1, active: -1 });
     return rows.map(({ player: _player, ...rest }) => rest);
   }
 
-  async teamHistory(teamId: string) {
+  async teamHistory(teamId: string, viewer: AuthUser | null = null) {
     await this.assertTeam(teamId);
-    const rows = await this.populated({ teamId: toObjectId(teamId) }, { startDate: -1 });
+    const rows = await this.populated({ teamId: toObjectId(teamId), tournamentId: { $nin: await this.access.hiddenDrafts(viewer) } }, { startDate: -1 });
     return rows.map(({ team: _team, ...rest }) => rest);
   }
 
@@ -123,10 +124,11 @@ export class MembershipsService {
    * participaciones activas en torneos NO finalizados, una por jugador — la de un torneo finalizado
    * sigue `active` pero es historia. Para agrupar por torneo: GET /teams/:id o /teams/:id/profile.
    */
-  async roster(teamId: string, tournamentId?: string) {
+  async roster(teamId: string, tournamentId?: string, viewer: AuthUser | null = null) {
     await this.assertTeam(teamId);
-    const filter: Record<string, unknown> = { teamId: toObjectId(teamId), active: true };
-    if (tournamentId) filter.tournamentId = toObjectId(tournamentId);
+    // 5B (D4): sin borradores que el visitante no puede ver.
+    const filter: Record<string, unknown> = { teamId: toObjectId(teamId), active: true, tournamentId: { $nin: await this.access.hiddenDrafts(viewer) } };
+    if (tournamentId) filter.tournamentId = { ...(filter.tournamentId as object), $eq: toObjectId(tournamentId) };
     const rows = await this.populated(filter, { startDate: -1 });
     const seen = new Set<string>();
     return rows
@@ -160,10 +162,9 @@ export class MembershipsService {
   }
 
   /** Jugadores participantes de un torneo (opcionalmente de un equipo). Lectura pública. */
-  async tournamentRoster(tournamentId: string, teamId?: string) {
-    if (!(await this.tournaments.exists({ _id: tournamentId }))) {
-      throw new NotFoundException(`Torneo ${tournamentId} no encontrado`);
-    }
+  async tournamentRoster(tournamentId: string, teamId?: string, viewer: AuthUser | null = null) {
+    // 5B (D4): un borrador solo lo ven su propietario y colaboradores (404 como si no existiera).
+    await this.access.assertVisible(tournamentId, viewer);
     const filter: Record<string, unknown> = { tournamentId: toObjectId(tournamentId), active: true };
     if (teamId) filter.teamId = toObjectId(teamId);
     const rows = await this.populated(filter, { startDate: -1 });
@@ -211,6 +212,8 @@ export class MembershipsService {
     // Con el cerrojo del torneo: no se cruza con finalizarlo, con retirar al equipo del torneo
     // (que borra sus participaciones), con otra alta del mismo jugador ni con otra del mismo equipo (cupo).
     await this.ownership.inTournament(tournamentId, { user, permission: Permission.TEAMS }, async (session) => {
+      // 5B: la ficha se vuelve a comprobar (y se bloquea) dentro de la transacción: no se cruza con su borrado.
+      await this.ownership.lockPlayers([pid], session);
       await this.assertEnrolled(tid, team, session, true);
       const role = await this.access.roleOf(tid, user.id, session);
       const entry = (action: MembershipAuditAction, reason: string | null = null, details: Record<string, unknown> | null = null) => ({ action, reason, by: toObjectId(user.id), role, at: new Date(), details });
@@ -322,7 +325,7 @@ export class MembershipsService {
       );
     });
 
-    return this.playerHistory(playerId);
+    return this.playerHistory(playerId, user);
   }
 
   /**
@@ -402,7 +405,7 @@ export class MembershipsService {
       previous.audit.push({ action: MembershipAuditAction.TRANSFER_ANNULLED, reason: reason.trim(), by: toObjectId(user.id), role, at: new Date(), details: { annulled, ...(jerseyTaken ? { jerseyCleared: clearedJersey } : {}) } });
       await previous.save({ session });
     });
-    return this.playerHistory(playerId);
+    return this.playerHistory(playerId, user);
   }
 
   // ─── Lado del equipo (OWNER/MANAGER) ─────────────────────────────────────────
@@ -461,6 +464,7 @@ export class MembershipsService {
     const [tid, team, pid] = [toObjectId(tournamentId), toObjectId(teamId), toObjectId(playerId)];
 
     await this.ownership.inTournament(tournamentId, null, async (session) => {
+      await this.ownership.lockPlayers([pid], session);
       await this.assertEnrolled(tid, team, session, true);
       const inRoster = await this.rosters.exists({ teamId: team, playerId: pid, status: TeamRosterStatus.ACTIVE }).session(session);
       if (!inRoster) throw new ConflictException('Primero agrega al jugador a la plantilla del equipo');

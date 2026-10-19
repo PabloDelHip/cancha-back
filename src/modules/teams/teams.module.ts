@@ -21,6 +21,7 @@ import { TeamRosterService } from './team-roster.service.js';
       Models.user,
       Models.teamRoster,
       Models.financeEntry,
+      Models.removedEnrollment,
       Models.player,
     ]),
     PlayersModule,

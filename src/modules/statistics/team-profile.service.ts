@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
+import type { AuthUser } from '../auth/auth.types.js';
 import { pointsRuleOf } from './calculations.js';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -63,16 +65,20 @@ export class TeamProfileService {
     @InjectModel(Tournament.name) private readonly tournaments: Model<Tournament>,
     @InjectModel(TournamentTeam.name) private readonly enrollments: Model<TournamentTeam>,
     @InjectModel(TeamRoster.name) private readonly globalRoster: Model<TeamRoster>,
+    private readonly access: TournamentAccessService,
   ) {}
 
-  async profile(id: string) {
+  async profile(id: string, viewer: AuthUser | null = null) {
     const teamId = toObjectId(id);
     const plays = { $or: [{ homeTeamId: teamId }, { awayTeamId: teamId }] };
+    // 5B (D4): los borradores que el visitante no puede ver no forman parte del perfil (en un
+    // borrador no se juega: solo aportarían su inscripción, plantilla y calendario).
+    const hidden = { $nin: await this.access.hiddenDrafts(viewer) };
     const [team, enrolled, playedIn, memberships, stats, roster] = await Promise.all([
       this.teams.findById(teamId).lean(),
-      this.enrollments.find({ teamId }).select('tournamentId').lean(),
-      this.matches.distinct('tournamentId', plays) as Promise<Types.ObjectId[]>,
-      this.memberships.find({ teamId }).select('playerId tournamentId jerseyNumber startDate active').lean(),
+      this.enrollments.find({ teamId, tournamentId: hidden }).select('tournamentId').lean(),
+      this.matches.distinct('tournamentId', { ...plays, tournamentId: hidden }) as Promise<Types.ObjectId[]>,
+      this.memberships.find({ teamId, tournamentId: hidden }).select('playerId tournamentId jerseyNumber startDate active').lean(),
       this.stats.aggregate<{ matchId: Types.ObjectId; playerId: Types.ObjectId; goals: number; assists: number; yellowCards: number; redCards: number; tournamentId: Types.ObjectId }>([
         { $match: { teamId, played: true } },
         { $lookup: { from: 'matches', localField: 'matchId', foreignField: '_id', as: 'match' } },

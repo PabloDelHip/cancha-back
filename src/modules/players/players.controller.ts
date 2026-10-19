@@ -40,7 +40,7 @@ import {
   UpdatePlayerDto,
 } from './dto/player.dto.js';
 import { Public } from '../auth/decorators/public.decorator.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { CurrentUser, Viewer } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { imageUploadOptions, type UploadedImage } from '../media/image-upload.js';
 import { IMAGE_FILE_BODY } from '../media/swagger.js';
@@ -79,8 +79,8 @@ export class PlayersController {
     summary: 'Jugador con membresía actual e historial de equipos',
   })
   @ApiNotFoundResponse({ description: 'Jugador no encontrado' })
-  findOne(@Param('id', IsObjectIdPipe) id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.service.findOne(id, viewer);
   }
 
   @Post('players')
@@ -151,8 +151,8 @@ export class PlayersController {
   @Public()
   @Get('players/:id/memberships')
   @ApiOperation({ summary: 'Historial de equipos del jugador' })
-  history(@Param('id', IsObjectIdPipe) id: string) {
-    return this.memberships.playerHistory(id);
+  history(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.memberships.playerHistory(id, viewer);
   }
 
   @Public()
@@ -162,8 +162,9 @@ export class PlayersController {
   tournamentRoster(
     @Param('tournamentId', IsObjectIdPipe) tournamentId: string,
     @Query() query: RosterQueryDto,
+    @Viewer() viewer: AuthUser | null,
   ) {
-    return this.memberships.tournamentRoster(tournamentId, query.teamId);
+    return this.memberships.tournamentRoster(tournamentId, query.teamId, viewer);
   }
 
   @Put('tournaments/:tournamentId/players/:playerId')
@@ -315,7 +316,7 @@ export class PlayersController {
   @ApiOperation({
     summary: 'Listar membresías (paginado; filtros playerId, teamId, active)',
   })
-  listMemberships(@Query() query: MembershipQueryDto) {
-    return this.memberships.list(query);
+  listMemberships(@Query() query: MembershipQueryDto, @Viewer() viewer: AuthUser | null) {
+    return this.memberships.list(query, viewer);
   }
 }

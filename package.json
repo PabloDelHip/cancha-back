@@ -23,7 +23,8 @@
     "test:unit": "vitest run",
     "team:assign-owner": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/assign-team-owner.js",
     "leagues:migrate": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/migrate-leagues.js",
-    "evidence:cleanup": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/cleanup-evidence.js"
+    "evidence:cleanup": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/cleanup-evidence.js",
+    "orphans:report": "tsc -p tsconfig.build.json --outDir dist-seed --tsBuildInfoFile dist-seed/tsconfig.tsbuildinfo && node dist-seed/scripts/find-orphans.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

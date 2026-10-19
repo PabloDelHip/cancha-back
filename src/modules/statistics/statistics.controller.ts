@@ -2,6 +2,9 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { IsObjectIdPipe } from '@nestjs/mongoose';
 import { ApiNotFoundResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../auth/decorators/public.decorator.js';
+import { Viewer } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/auth.types.js';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import { StatisticsService } from './statistics.service.js';
 import { PlayerProfileService } from './player-profile.service.js';
 import { TeamProfileService } from './team-profile.service.js';
@@ -16,6 +19,7 @@ export class StatisticsController {
     private readonly service: StatisticsService,
     private readonly profiles: PlayerProfileService,
     private readonly teamProfiles: TeamProfileService,
+    private readonly access: TournamentAccessService,
   ) {}
 
   @Get('teams/:id/profile')
@@ -25,8 +29,8 @@ export class StatisticsController {
       'Fuente de verdad del Team Profile: balance histórico (solo partidos FINISHED), participaciones actuales (inscripciones en torneos no finalizados), competiciones, plantillas POR torneo, goleadores con este equipo, partidos recientes y próximos, historial por año y honors verificables (campeón de liga solo con tabla final completa y sin empate). Datos personales minimizados.',
   })
   @ApiNotFoundResponse({ description: 'Equipo no encontrado' })
-  teamProfile(@Param('id', IsObjectIdPipe) id: string) {
-    return this.teamProfiles.profile(id);
+  teamProfile(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.teamProfiles.profile(id, viewer);
   }
 
   @Get('teams/:id/matches')
@@ -43,8 +47,8 @@ export class StatisticsController {
       'Fuente de verdad del Player Profile: carrera, participaciones actuales (activas en torneos no finalizados), competiciones (torneo → equipos), historial por año, últimos resultados y 5 partidos recientes. Solo partidos FINISHED. Datos personales minimizados: edad derivada, nunca la fecha de nacimiento.',
   })
   @ApiNotFoundResponse({ description: 'Jugador no encontrado' })
-  profile(@Param('id', IsObjectIdPipe) id: string) {
-    return this.profiles.profile(id);
+  profile(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.profiles.profile(id, viewer);
   }
 
   @Get('tournaments/:id/standings')
@@ -53,16 +57,19 @@ export class StatisticsController {
     description:
       'Solo partidos FINISHED (programados, en juego, pospuestos y cancelados no cuentan). Puntos según Tournament.settings (por defecto 3/1/0). Orden: puntos, diferencia de goles, goles a favor.',
   })
-  standings(@Param('id', IsObjectIdPipe) id: string) {
+  async standings(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    await this.access.assertVisible(id, viewer);
     return this.service.standings(id);
   }
 
   @Get('tournaments/:id/top-scorers')
   @ApiOperation({ summary: 'Goleadores del torneo (solo partidos FINISHED)' })
-  topScorers(
+  async topScorers(
     @Param('id', IsObjectIdPipe) id: string,
     @Query() query: TopScorersQueryDto,
+    @Viewer() viewer: AuthUser | null,
   ) {
+    await this.access.assertVisible(id, viewer);
     return this.service.topScorers(id, query.limit);
   }
 

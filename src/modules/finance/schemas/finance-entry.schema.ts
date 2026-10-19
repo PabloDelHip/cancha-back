@@ -91,11 +91,21 @@ export class FinanceEntry {
   @Prop({ type: Types.ObjectId, default: null })
   replaces: Types.ObjectId | null;
 
+  /** Corrección (4D): el movimiento que reemplaza a este (anulado). */
+  @Prop({ type: Types.ObjectId, default: null })
+  replacedBy: Types.ObjectId | null;
+
+  /** Clave de idempotencia de la anulación (4D): repetirla devuelve la misma anulación. */
+  @Prop({ type: String, default: null })
+  voidRequestId: string | null;
+
   createdAt: Date;
 }
 
 export type FinanceEntryDocument = HydratedDocument<FinanceEntry>;
 export const FinanceEntrySchema = SchemaFactory.createForClass(FinanceEntry);
-FinanceEntrySchema.index({ tournamentId: 1, teamId: 1, date: 1 });
+// Estado de cuenta paginado en orden cronológico (4D) y listado del torneo con filtros.
+FinanceEntrySchema.index({ tournamentId: 1, teamId: 1, date: 1, createdAt: 1, _id: 1 });
+FinanceEntrySchema.index({ tournamentId: 1, date: 1, createdAt: 1, _id: 1 });
 FinanceEntrySchema.index({ tournamentId: 1, requestId: 1 }, { name: 'one_entry_per_request', unique: true });
 FinanceEntrySchema.index({ teamId: 1 });

@@ -42,6 +42,8 @@ it('crea información completa junto a grupos y puntuación, sin activar inscrip
 });
 
 it('solo publica contactos seleccionados; el organizador conserva los demás al editar', async () => {
+  // 5B (D4): un borrador no es público; lo que se comprueba aquí es la vista pública de un torneo publicado.
+  await tournaments.collection.updateOne({ _id: new Types.ObjectId(richId) }, { $set: { status: 'ACTIVE' } });
   const publicDoc = (await api().get(`/api/tournaments/${richId}`).expect(200)).body;
   for (const field of ['email', 'instagram', 'notes']) expect(publicDoc.information.contact).not.toHaveProperty(field);
   expect(publicDoc.information.contact).toMatchObject({ name: 'Responsable', phone: '+52 9981234567' });
@@ -86,7 +88,7 @@ it('los horarios informativos no restringen partidos ni el generador; conserva i
     await as().post(`/api/tournaments/${t.id}/teams/${team.id}`).expect(201);
   }
   await as().post(`/api/tournaments/${t.id}/schedule`).send({ startDate: '2027-04-05', firstKickoff: '23:00' }).expect(201);
-  const matches = (await api().get(`/api/tournaments/${t.id}/matches`).expect(200)).body;
+  const matches = (await as().get(`/api/tournaments/${t.id}/matches`).expect(200)).body;
   expect(matches).toHaveLength(1); expect(matches[0]).toMatchObject({ date: '2027-04-05', time: '23:00' });
   await as().post(`/api/tournaments/${t.id}/start`).expect(200);
   await as().post(`/api/tournaments/${t.id}/finish`).send({ allowPendingMatches: true }).expect(200);
@@ -97,7 +99,7 @@ it('los horarios informativos no restringen partidos ni el generador; conserva i
 it('lee y edita documentos antiguos sin los nuevos campos', async () => {
   const t = (await as().post('/api/tournaments').send(input).expect(201)).body;
   await tournaments.collection.updateOne({ _id: new Types.ObjectId(t.id) }, { $unset: { information: '', logoUrl: '' } });
-  await api().get(`/api/tournaments/${t.id}`).expect(200);
+  await as().get(`/api/tournaments/${t.id}`).expect(200);
   await as().patch(`/api/tournaments/${t.id}`).send({ information: { rules: { text: 'Reglamento' } } }).expect(200);
   expect((await as().get(`/api/admin/tournaments/${t.id}`).expect(200)).body.information).toMatchObject({ rules: { text: 'Reglamento' }, costs: { currency: 'MXN' } });
 });
@@ -115,7 +117,7 @@ it('reutiliza Cloudinary para el logo, valida contenido y protege propiedad e id
   expect(res.body.logoUrl).toContain('https://res.cloudinary.com'); expect(res.body).not.toHaveProperty('logoPublicId');
   await as().delete(`/api/tournaments/${t.id}/logo`).expect(200);
   expect(destroy).toHaveBeenCalledWith('kikovo/tournaments/logo1');
-  expect((await api().get(`/api/tournaments/${t.id}`).expect(200)).body.logoUrl).toBeNull();
+  expect((await as().get(`/api/tournaments/${t.id}`).expect(200)).body.logoUrl).toBeNull();
 });
 
 it('una subida que termina después de finalizar no cambia el historial y limpia el archivo nuevo', async () => {

@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
+import type { AuthUser } from '../auth/auth.types.js';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, type PipelineStage } from 'mongoose';
 import { Player } from '../players/schemas/player.schema.js';
@@ -97,14 +99,17 @@ export class PlayerProfileService {
     @InjectModel(Team.name) private readonly teams: Model<Team>,
     @InjectModel(Match.name) private readonly matches: Model<Match>,
     @InjectModel(TournamentTeam.name) private readonly enrollments: Model<TournamentTeam>,
+    private readonly access: TournamentAccessService,
   ) {}
 
-  async profile(playerId: string) {
+  async profile(playerId: string, viewer: AuthUser | null = null) {
+    // 5B (D4): sin los borradores que el visitante no puede ver (ahí no se juega: solo aportarían la participación).
+    const hidden = await this.access.hiddenDrafts(viewer);
     const [player, rows, memberships] = await Promise.all([
       this.players.findById(playerId).lean(),
       this.stats.aggregate<StatWithMatch>(officialMatchesPipeline(playerId)),
       this.memberships
-        .find({ playerId: toObjectId(playerId) })
+        .find({ playerId: toObjectId(playerId), tournamentId: { $nin: hidden } })
         .select('tournamentId teamId jerseyNumber startDate endDate active')
         .lean(),
     ]);

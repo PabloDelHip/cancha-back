@@ -10,6 +10,13 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 /**
  * Guard global: exige un access token válido salvo en rutas @Public().
  * Registrado como APP_GUARD en AppModule.
+ *
+ * 5B (D4): en una LECTURA pública (GET) el token es OPCIONAL. Sin `Authorization` se lee como
+ * anónimo; si viene, se valida y `request.user` queda disponible (`@Viewer()`), p. ej. para que el
+ * propietario y sus colaboradores vean sus torneos en borrador. Un token inválido o vencido responde
+ * 401 (no se degrada en silencio a anónimo): así el front renueva la sesión y reintenta. Las rutas
+ * públicas que no son GET (login, registro, refresh, logout) ignoran el header como siempre: el
+ * refresh llega justamente con el access token vencido.
  */
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -22,7 +29,11 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       context.getHandler(),
       context.getClass(),
     ]);
-    return isPublic ? true : super.canActivate(context);
+    if (!isPublic) return super.canActivate(context);
+    const req = context.switchToHttp().getRequest<{ method: string; headers: Record<string, string | undefined> }>();
+    // Un encabezado sin token («Bearer » vacío) no es una credencial: se lee como anónimo.
+    const token = req.headers.authorization?.replace(/^Bearer\s*/i, '').trim();
+    return req.method === 'GET' && token ? super.canActivate(context) : true;
   }
 
   handleRequest<TUser>(err: unknown, user: TUser | false): TUser {

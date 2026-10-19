@@ -30,7 +30,7 @@ import {
   UpdateMatchDto,
 } from './dto/match.dto.js';
 import { Public } from '../auth/decorators/public.decorator.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { CurrentUser, Viewer } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
 @ApiTags('matches')
@@ -44,15 +44,16 @@ export class MatchesController {
     summary:
       'Listar partidos (público, paginado; filtros tournamentId, teamId, status)',
   })
-  findAll(@Query() query: MatchQueryDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: MatchQueryDto, @Viewer() viewer: AuthUser | null) {
+    return this.service.findAll(query, viewer);
   }
 
   @Public()
   @Get('matches/:id')
   @ApiOperation({ summary: 'Partido con sus estadísticas individuales' })
   @ApiNotFoundResponse({ description: 'Partido no encontrado' })
-  findOne(@Param('id', IsObjectIdPipe) id: string) {
+  async findOne(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    await this.service.assertVisible(id, viewer);
     return this.service.findOne(id);
   }
 
@@ -138,7 +139,8 @@ export class MatchesController {
   @Public()
   @Get('matches/:id/stats')
   @ApiOperation({ summary: 'Estadísticas individuales del partido' })
-  stats(@Param('id', IsObjectIdPipe) id: string) {
+  async stats(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    await this.service.assertVisible(id, viewer);
     return this.service.listStats(id);
   }
 
@@ -146,7 +148,7 @@ export class MatchesController {
   @Get('tournaments/:id/matches')
   @ApiTags('tournaments')
   @ApiOperation({ summary: 'Todos los partidos del torneo' })
-  byTournament(@Param('id', IsObjectIdPipe) id: string) {
-    return this.service.findByTournament(id);
+  async byTournament(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.service.findByTournament(id, viewer);
   }
 }

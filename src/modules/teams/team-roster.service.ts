@@ -8,6 +8,7 @@ import { newPlayerFields } from '../players/players.service.js';
 import { PlayerDuplicatesService } from '../players/player-duplicates.service.js';
 import { TeamRosterStatus } from '../../common/enums/index.js';
 import { TeamAccessService } from '../../common/authorization/team-access.service.js';
+import { OwnershipService } from '../../common/authorization/ownership.service.js';
 import { publicPlayer } from '../../common/utils/public.js';
 import { todayISODate } from '../../common/utils/dates.js';
 import { toObjectId } from '../../common/utils/serialize.js';
@@ -33,6 +34,7 @@ export class TeamRosterService {
     @InjectModel(Player.name) private readonly players: Model<Player>,
     @InjectConnection() private readonly connection: Connection,
     private readonly access: TeamAccessService,
+    private readonly ownership: OwnershipService,
     private readonly duplicates: PlayerDuplicatesService,
   ) {}
 
@@ -100,17 +102,24 @@ export class TeamRosterService {
    * (`created: false`). Dos altas simultáneas: una inserta y la otra choca con el índice único
    * parcial y resuelve igual. Si tuvo periodos anteriores, se abre uno nuevo (reincorporación)
    * sin tocar los cerrados.
+   *
+   * 5B: en una transacción con el cerrojo de la ficha (`lockPlayers`, el mismo que toma su borrado):
+   * nunca queda un periodo apuntando a una ficha borrada a la vez (404 si ya no existe).
    */
   private async ensureActive(teamId: string, playerId: Types.ObjectId, user: AuthUser) {
     const key = { teamId: toObjectId(teamId), playerId };
     let created = false;
-    if (!(await this.roster.exists({ ...key, status: ACTIVE }))) {
-      try {
-        await this.roster.create({ ...key, status: ACTIVE, joinedAt: todayISODate(), leftAt: null, addedBy: toObjectId(user.id) });
+    try {
+      await this.connection.transaction(async (session) => {
+        created = false;
+        await this.ownership.lockPlayers([playerId], session);
+        if (await this.roster.exists({ ...key, status: ACTIVE }).session(session)) return;
+        await this.roster.create([{ ...key, status: ACTIVE, joinedAt: todayISODate(), leftAt: null, addedBy: toObjectId(user.id) }], { session });
         created = true;
-      } catch (e) {
-        if (!isDuplicateKey(e)) throw e; // otra alta ganó la carrera: el resultado es el mismo
-      }
+      });
+    } catch (e) {
+      if (!isDuplicateKey(e)) throw e; // otra alta ganó la carrera: el resultado es el mismo
+      created = false;
     }
     const [period] = await this.periods(teamId, 'active', playerId.toHexString());
     return { created, period };

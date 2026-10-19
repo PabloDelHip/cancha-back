@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FinanceEntry } from '../finance/schemas/finance-entry.schema.js';
+import { RemovedEnrollment } from '../tournaments/schemas/removed-enrollment.schema.js';
 import { Model, Types } from 'mongoose';
 import { Team } from './schemas/team.schema.js';
 import { TournamentTeam } from '../tournaments/schemas/tournament-team.schema.js';
@@ -44,6 +45,7 @@ export class TeamsService {
     @InjectModel(TeamAdmin.name) private readonly admins: Model<TeamAdmin>,
     @InjectModel(TeamRoster.name) private readonly rosters: Model<TeamRoster>,
     @InjectModel(FinanceEntry.name) private readonly finance: Model<FinanceEntry>,
+    @InjectModel(RemovedEnrollment.name) private readonly removed: Model<RemovedEnrollment>,
     private readonly membershipsService: MembershipsService,
     private readonly access: TeamAccessService,
     private readonly tournamentAccess: TournamentAccessService,
@@ -103,14 +105,17 @@ export class TeamsService {
    * Ficha del equipo: datos, plantillas actuales POR TORNEO (torneos no finalizados), torneos y
    * partidos recientes. El perfil histórico completo está en GET /teams/:id/profile.
    */
-  async findOne(id: string) {
+  async findOne(id: string, viewer: AuthUser | null = null) {
     const team = await this.teams.findById(id).lean();
     if (!team) throw new NotFoundException(`Equipo ${id} no encontrado`);
     const teamId = toObjectId(id);
+    // 5B (D4): sin los borradores que el visitante no puede ver (inscripción, plantilla ni calendario).
+    const hidden = { $nin: await this.tournamentAccess.hiddenDrafts(viewer) };
     const tournamentIds = await this.enrollments.distinct('tournamentId', {
       teamId,
+      tournamentId: hidden,
     });
-    const plays = { $or: [{ homeTeamId: teamId }, { awayTeamId: teamId }] };
+    const plays = { $or: [{ homeTeamId: teamId }, { awayTeamId: teamId }], tournamentId: hidden };
     const [tournaments, recentMatches, upcomingMatches] = await Promise.all([
       this.tournaments
         .find({ _id: { $in: tournamentIds } })
@@ -155,7 +160,7 @@ export class TeamsService {
     // Un logo subido a Cloudinary que se sustituye por otra URL (o null) deja de ser nuestro: se borra.
     const replacesUpload = dto.logoUrl !== undefined && dto.logoUrl !== current.logoUrl;
     const updated = await this.teams
-      .findByIdAndUpdate(id, { ...dto, ...(replacesUpload ? { logoPublicId: null } : {}) }, { new: true, runValidators: true })
+      .findByIdAndUpdate(id, { ...dto, ...(replacesUpload ? { logoPublicId: null } : {}) }, { returnDocument: 'after', runValidators: true })
       .lean();
     if (replacesUpload) await this.cloudinary.destroy(current.logoPublicId);
     return serialize(updated!);
@@ -221,6 +226,12 @@ export class TeamsService {
       throw new ConflictException(
         'El equipo tiene (o tuvo) jugadores registrados y no puede eliminarse',
       );
+    }
+    // 5B (D3): quitado de un torneo, quedó en `removed_enrollments` (historial de plantillas 3E: el
+    // evento «equipo quitado» y las participaciones copiadas, que admiten multas): sin el equipo, ese
+    // historial perdería su nombre.
+    if (await this.removed.exists({ teamId })) {
+      throw new ConflictException({ statusCode: 409, error: 'TEAM_HAS_HISTORY', message: 'El equipo fue quitado de un torneo y ese historial se conserva: no puede eliminarse' });
     }
     // Inscrito en torneos de otros organizadores: borrarlo alteraría torneos ajenos.
     const tournamentIds = await this.enrollments.distinct('tournamentId', { teamId });

@@ -30,7 +30,7 @@ import { MembershipsService } from '../players/memberships.service.js';
 import { TeamRosterQueryDto } from '../players/dto/player.dto.js';
 import { CreateTeamDto, TeamQueryDto, UpdateTeamDto } from './dto/team.dto.js';
 import { Public } from '../auth/decorators/public.decorator.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { CurrentUser, Viewer } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { imageUploadOptions, type UploadedImage } from '../media/image-upload.js';
 import { IMAGE_FILE_BODY } from '../media/swagger.js';
@@ -66,8 +66,8 @@ export class TeamsController {
     summary: 'Ficha del equipo: plantilla actual, torneos y partidos recientes',
   })
   @ApiNotFoundResponse({ description: 'Equipo no encontrado' })
-  findOne(@Param('id', IsObjectIdPipe) id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.service.findOne(id, viewer);
   }
 
   @Post('teams')
@@ -167,8 +167,8 @@ export class TeamsController {
     summary: 'LEGACY: jugadores del equipo en sus torneos (TeamMembership). Plantilla global: /global-roster',
     deprecated: true,
   })
-  roster(@Param('id', IsObjectIdPipe) id: string, @Query() query: TeamRosterQueryDto) {
-    return this.memberships.roster(id, query.tournamentId);
+  roster(@Param('id', IsObjectIdPipe) id: string, @Query() query: TeamRosterQueryDto, @Viewer() viewer: AuthUser | null) {
+    return this.memberships.roster(id, query.tournamentId, viewer);
   }
 
   @Public()
@@ -176,7 +176,7 @@ export class TeamsController {
   @ApiOperation({
     summary: 'Historial de membresías del equipo (actuales y pasadas)',
   })
-  history(@Param('id', IsObjectIdPipe) id: string) {
-    return this.memberships.teamHistory(id);
+  history(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.memberships.teamHistory(id, viewer);
   }
 }

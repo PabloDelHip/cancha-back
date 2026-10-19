@@ -50,7 +50,10 @@ const result = (org: Org, m: string, hs: number, as_: number, playerStats: unkno
     .put(`/api/matches/${m}/result`)
     .send({ homeScore: hs, awayScore: as_, playerStats, ...(status ? { status } : {}) })
     .expect(200);
-const profile = async (id: string) => (await api().get(`/api/teams/${id}/profile`).expect(200)).body;
+// 5B (D4): el escenario incluye un borrador de A (x.estatal), que solo ve A; el perfil se lee como
+// A para conservar estas comprobaciones, y aparte se comprueba lo que ve el público (sin el borrador).
+const profile = async (id: string) => (await authed(http, A.token).get(`/api/teams/${id}/profile`).expect(200)).body;
+const publicProfile = async (id: string) => (await api().get(`/api/teams/${id}/profile`).expect(200)).body;
 
 const FORBIDDEN = ['birthDate', 'email', 'phone', 'password', 'passwordHash', 'refreshToken', 'tokenHash', 'createdBy', 'organizerId', 'searchName', 'writeSeq'];
 function forbiddenKeys(value: unknown, path = '$'): string[] {
@@ -164,6 +167,11 @@ describe('GET /teams/:id/profile', () => {
       [x.copa, 'FINISHED', false, 2],
     ]);
     expect(p.currentParticipations.map((c: { tournament: { id: string } }) => c.tournament.id)).toEqual([x.estatal, x.liga]);
+    // Sin sesión (o sin acceso al borrador) el perfil no lo incluye.
+    const pub = await publicProfile(x.dm);
+    expect(pub.competitions.map((c: { tournament: { id: string } }) => c.tournament.id)).toEqual([x.liga, x.copa]);
+    expect(pub.currentParticipations.map((c: { tournament: { id: string } }) => c.tournament.id)).toEqual([x.liga]);
+    expect(pub.career.competitions).toBe(2);
   });
 
   it('posiciones: la actual coincide con GET /standings; la final solo si es verificable', async () => {

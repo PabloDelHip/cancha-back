@@ -4,7 +4,7 @@ import { ApiBearerAuth, ApiConflictResponse, ApiForbiddenResponse, ApiOperation,
 import { LeaguesService } from './leagues.service.js';
 import { CreateLeagueDto, UpdateLeagueDto } from './dto/league.dto.js';
 import { Public } from '../auth/decorators/public.decorator.js';
-import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { CurrentUser, Viewer } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
 @ApiTags('leagues')
@@ -15,8 +15,8 @@ export class LeaguesController {
   @Public()
   @Get('leagues')
   @ApiOperation({ summary: 'Ligas con torneos (más recientes primero)' })
-  list() {
-    return this.service.list();
+  list(@Viewer() viewer: AuthUser | null) {
+    return this.service.list(viewer);
   }
 
   @Get('admin/leagues')
@@ -29,15 +29,15 @@ export class LeaguesController {
   @Public()
   @Get('leagues/:id')
   @ApiOperation({ summary: 'Liga y sus torneos' })
-  findOne(@Param('id', IsObjectIdPipe) id: string) {
-    return this.service.findOne(id);
+  findOne(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.service.findOne(id, viewer);
   }
 
   @Public()
   @Get('leagues/:id/history')
   @ApiOperation({ summary: 'Histórico de la liga: campeones, tabla histórica, jugadores, porteros y récords' })
-  history(@Param('id', IsObjectIdPipe) id: string) {
-    return this.service.history(id);
+  history(@Param('id', IsObjectIdPipe) id: string, @Viewer() viewer: AuthUser | null) {
+    return this.service.history(id, viewer);
   }
 
   @Post('leagues')

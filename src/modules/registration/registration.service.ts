@@ -221,6 +221,8 @@ export class RegistrationService {
       const t = await this.tournaments.findById(owned._id).select('status registration').session(session).lean<LeanTournament>();
       const problems = await this.problemsOf(t!, request.teamId, request.playerIds, session);
       if (problems.length) throw new ConflictException({ message: problems.map((p) => p.message).join(' '), problems });
+      // 5B: las fichas se bloquean antes de crear sus participaciones (mismo cerrojo que su borrado).
+      await this.ownership.lockPlayers(request.playerIds, session);
 
       await this.enrollments.create([{ tournamentId: owned._id, teamId: request.teamId }], { session });
       const startDate = todayISODate();

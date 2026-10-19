@@ -1,5 +1,6 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsMongoId, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsDefined, IsEnum, IsIn, ValidateNested, IsInt, IsMongoId, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { IsISODateOnly, Trim } from '../../../common/validators.js';
 import { FinanceCategory, FinanceEntryKind, MAX_AMOUNT_CENTS, PaymentMethod } from '../finance.js';
 
@@ -88,4 +89,101 @@ export class GenerateEnrollmentChargesDto {
   @IsOptional()
   @IsISODateOnly()
   date?: string;
+}
+
+/** 4D (F6) — anular un movimiento: queda en el libro, marcado, y deja de contar en el saldo. */
+export class VoidFinanceEntryDto {
+  @ApiProperty({ format: 'uuid', description: 'Clave de idempotencia (una por diálogo)' })
+  @IsUUID()
+  requestId: string;
+
+  @ApiProperty({ minLength: 3, maxLength: 500 })
+  @Trim()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string;
+
+  @ApiPropertyOptional({ description: 'Confirma que el cambio deje (más) saldo a favor del equipo' })
+  @IsOptional()
+  @IsBoolean()
+  allowCredit?: boolean;
+}
+
+/** El movimiento que reemplaza al corregido: mismo equipo (no se indica) y su propia validación. */
+export class ReplacementEntryDto extends OmitType(CreateFinanceEntryDto, ['requestId', 'teamId', 'allowCredit'] as const) {}
+
+/** 4D (F6) — corregir = anular y registrar el reemplazo, enlazados y en una sola transacción. */
+export class CorrectFinanceEntryDto extends VoidFinanceEntryDto {
+  @ApiProperty({ type: ReplacementEntryDto })
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ReplacementEntryDto)
+  entry: ReplacementEntryDto;
+}
+
+/** 4D — filtros del listado y de la exportación de movimientos. */
+export class FinanceEntriesQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsMongoId()
+  teamId?: string;
+
+  @ApiPropertyOptional({ enum: [...Object.values(FinanceEntryKind), 'FINE'] })
+  @IsOptional()
+  @IsIn([...Object.values(FinanceEntryKind), 'FINE'])
+  kind?: FinanceEntryKind | 'FINE';
+
+  @ApiPropertyOptional({ enum: PaymentMethod })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  method?: PaymentMethod;
+
+  @ApiPropertyOptional({ description: 'Desde (YYYY-MM-DD, incluido)' })
+  @IsOptional()
+  @IsISODateOnly()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Hasta (YYYY-MM-DD, incluido)' })
+  @IsOptional()
+  @IsISODateOnly()
+  to?: string;
+
+  @ApiPropertyOptional({ enum: ['active', 'voided', 'all'], default: 'all', description: 'Vigentes, anulados o todos' })
+  @IsOptional()
+  @IsIn(['active', 'voided', 'all'])
+  status?: 'active' | 'voided' | 'all';
+
+  @ApiPropertyOptional({ minimum: 1, default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 200, default: 50 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+}
+
+/** 4D — página del estado de cuenta (por defecto, la última: lo más reciente). */
+export class StatementQueryDto {
+  @ApiPropertyOptional({ minimum: 1, description: 'Por defecto, la última página' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 500, default: 50 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit?: number;
 }

@@ -45,7 +45,8 @@ const match = async (t: string, round: number, home: string, away: string, date 
   (await as(O).post('/api/matches').send({ tournamentId: t, round, homeTeamId: home, awayTeamId: away, date, time: '18:00' }).expect(201)).body.id as string;
 const memberships = (t: string, p: string) =>
   db().collection('team_memberships').find({ tournamentId: new Types.ObjectId(t), playerId: new Types.ObjectId(p) }).sort({ _id: 1 }).toArray();
-const yesterday = () => new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+// 5B: «ayer» en la fecha LOCAL, como el servidor (todayISODate); en UTC fallaba de 19:00 a 24:00 (UTC−5).
+const yesterday = () => todayISODate(new Date(Date.now() - 864e5));
 async function join(t: string, u: U, role: string) {
   const inv = (await as(O).post(`/api/tournaments/${t}/invitations`).send({ kind: 'LINK', role }).expect(201)).body;
   await as(u).post(`/api/invitations/${inv.token}/accept`).expect(200);

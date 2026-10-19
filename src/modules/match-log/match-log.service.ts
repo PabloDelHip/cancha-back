@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { ClientSession } from 'mongoose';
@@ -7,6 +7,10 @@ import { Match } from '../matches/schemas/match.schema.js';
 import { Team } from '../teams/schemas/team.schema.js';
 import { User } from '../users/schemas/user.schema.js';
 import { Referee, refereeName } from '../referees/schemas/referee.schema.js';
+import { FinanceEntry } from '../finance/schemas/finance-entry.schema.js';
+import { MatchSheet } from '../match-sheet/schemas/match-sheet.schema.js';
+import { MatchEvidence } from '../match-sheet/schemas/match-evidence.schema.js';
+import { MatchIncident } from '../match-incidents/schemas/match-incident.schema.js';
 import { MatchLogAction, MatchLogCause, MatchLogSource } from '../../common/enums/index.js';
 import { OwnershipService } from '../../common/authorization/ownership.service.js';
 import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
@@ -36,6 +40,10 @@ export class MatchLogService {
     @InjectModel(Team.name) private readonly teams: Model<Team>,
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(Referee.name) private readonly referees: Model<Referee>,
+    @InjectModel(FinanceEntry.name) private readonly finance: Model<FinanceEntry>,
+    @InjectModel(MatchSheet.name) private readonly sheets: Model<MatchSheet>,
+    @InjectModel(MatchIncident.name) private readonly incidents: Model<MatchIncident>,
+    @InjectModel(MatchEvidence.name) private readonly evidence: Model<MatchEvidence>,
     private readonly ownership: OwnershipService,
     private readonly access: TournamentAccessService,
   ) {}
@@ -110,10 +118,40 @@ export class MatchLogService {
   }
 
   /**
+   * 5B (D2) — ÚNICA forma de borrar partidos (borrado manual, calendario regenerado, cambio de
+   * formato, cruce quitado, sincronización de la eliminatoria). Dentro de la transacción del cambio:
+   * - Un partido vinculado a un movimiento financiero (multa, aunque esté anulada) no se borra:
+   *   409 MATCH_HAS_FINANCE (los movimientos son historia, módulo 4).
+   * - Deja constancia en el historial (`deleting`) y borra con él lo que solo existe por ese partido
+   *   sin resultado: ficha técnica, incidencias y registros de evidencias (los archivos privados
+   *   sin registro los limpia `evidence:cleanup`). Así no quedan referencias huérfanas.
+   */
+  async removeMatches(session: ClientSession, actor: Actor, filter: Record<string, unknown>, cause: MatchLogCause, opts: { bulk?: boolean; reason?: string | null } = {}) {
+    const ids = (await this.matches.distinct('_id', filter).session(session)) as Types.ObjectId[];
+    if (!ids.length) return;
+    if (await this.finance.exists({ matchId: { $in: ids } }).session(session)) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'MATCH_HAS_FINANCE',
+        message:
+          ids.length === 1
+            ? 'El partido está vinculado a una multa u otro movimiento financiero y no puede eliminarse; márcalo como cancelado'
+            : 'Hay partidos vinculados a multas u otros movimientos financieros: no pueden eliminarse',
+      });
+    }
+    const byId = { _id: { $in: ids } };
+    await this.deleting(session, actor, byId, cause, opts);
+    await this.sheets.deleteMany({ matchId: { $in: ids } }, { session });
+    await this.incidents.deleteMany({ matchId: { $in: ids } }, { session });
+    await this.evidence.deleteMany({ matchId: { $in: ids } }, { session });
+    await this.matches.deleteMany(byId, { session });
+  }
+
+  /**
    * Antes de eliminar partidos: una entrada por partido con su copia y lo que se libera. Con
    * `bulk` (calendario reemplazado) es una sola entrada con todos, consultable por partido.
    */
-  async deleting(session: ClientSession, actor: Actor, filter: Record<string, unknown>, cause: MatchLogCause, opts: { bulk?: boolean; reason?: string | null } = {}) {
+  private async deleting(session: ClientSession, actor: Actor, filter: Record<string, unknown>, cause: MatchLogCause, opts: { bulk?: boolean; reason?: string | null } = {}) {
     const docs = (await this.matches.find(filter).session(session).lean()) as unknown as Doc[];
     if (!docs.length) return;
     const released = (d: Doc) => releasedOf(rec(d));

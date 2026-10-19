@@ -122,8 +122,7 @@ export class ScheduleService {
       if (plan.rounds.length > 99) throw new BadRequestException('El calendario superaría las 99 jornadas');
 
       // Los partidos reemplazados quedan en el historial del torneo (una sola entrada, con lo liberado).
-      await this.log.deleting(session, { userId: user.id }, { tournamentId: tid }, MatchLogCause.SCHEDULE_REGENERATED, { bulk: true });
-      await this.matches.deleteMany({ tournamentId: tid }, { session });
+      await this.log.removeMatches(session, { userId: user.id }, { tournamentId: tid }, MatchLogCause.SCHEDULE_REGENERATED, { bulk: true });
       await this.rounds.deleteMany({ tournamentId: tid }, { session });
       await this.rounds.insertMany(plan.rounds.map((r) => ({ tournamentId: tid, ...r })), { session });
       if (plan.matches.length) await this.matches.insertMany(plan.matches.map((m) => matchDoc(tid, m)), { session });
