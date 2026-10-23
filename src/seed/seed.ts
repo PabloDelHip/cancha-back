@@ -4,10 +4,11 @@
  *   npm run seed
  *
  * Es idempotente: borra y recrea SOLO las colecciones de esta app (incluidos usuarios y sesiones) en la base configurada
- * en MONGODB_URI. Por seguridad se niega a ejecutarse si NODE_ENV=production o si el host
- * no es local (localhost / 127.0.0.1 / ::1), salvo SEED_ALLOW_REMOTE=true explícito.
+ * en MONGODB_URI. Por seguridad (common/utils/db-target.ts) nunca se ejecuta con NODE_ENV=production
+ * ni contra MongoDB Atlas; otro host no local (localhost / 127.0.0.1 / ::1) solo con SEED_ALLOW_REMOTE=true.
  */
 import { Logger } from '@nestjs/common';
+import { assertDisposableDb } from '../common/utils/db-target.js';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
@@ -39,7 +40,6 @@ import { LeagueAccessService } from '../common/authorization/league-access.servi
  */
 export { DEMO_PASSWORD };
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 const POSITION = {
   GK: PlayerPosition.GOALKEEPER,
@@ -64,24 +64,6 @@ const M_STATUS = {
   cancelled: MatchStatus.CANCELLED,
 };
 
-function assertSafeTarget(uri: string, nodeEnv: string) {
-  if (nodeEnv === 'production')
-    throw new Error('El seed no se ejecuta con NODE_ENV=production.');
-  const hostList =
-    uri
-      .replace(/^mongodb(\+srv)?:\/\//, '')
-      .split('/')[0]
-      .split('@')
-      .pop() ?? '';
-  const hosts = hostList.split(',').map((h) => h.replace(/:\d+$/, ''));
-  const remote = hosts.filter((h) => !LOCAL_HOSTS.has(h));
-  if (remote.length && process.env.SEED_ALLOW_REMOTE !== 'true') {
-    throw new Error(
-      `El seed solo se ejecuta contra MongoDB local. Host(s) no local(es): ${remote.join(', ')}. Usa SEED_ALLOW_REMOTE=true si realmente es una base de desarrollo.`,
-    );
-  }
-}
-
 async function run() {
   const logger = new Logger('Seed');
   // Verifica el destino ANTES de conectar, con las mismas variables que usará la app.
@@ -91,7 +73,8 @@ async function run() {
     // sin .env: se usan las variables del entorno
   }
   const env = validateEnv(process.env);
-  assertSafeTarget(env.MONGODB_URI, env.NODE_ENV);
+  const target = assertDisposableDb(env.MONGODB_URI, env.NODE_ENV, 'El seed');
+  logger.log(`Base: ${target.label}`);
 
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn'],
@@ -100,7 +83,7 @@ async function run() {
   try {
     const config = app.get<ConfigService<EnvConfig, true>>(ConfigService);
     const uri = config.get('MONGODB_URI', { infer: true });
-    assertSafeTarget(uri, config.get('NODE_ENV', { infer: true }));
+    assertDisposableDb(uri, config.get('NODE_ENV', { infer: true }), 'El seed');
 
     const model = <T>(def: { name: string }) =>
       app.get<Model<T>>(getModelToken(def.name));

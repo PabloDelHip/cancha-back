@@ -20,6 +20,7 @@ import { LeaguesModule } from './modules/leagues/leagues.module.js';
 import { MatchLogModule } from './modules/match-log/match-log.module.js';
 import { MatchIncidentsModule } from './modules/match-incidents/match-incidents.module.js';
 import { AgendaModule } from './modules/agenda/agenda.module.js';
+import { SchedulingModule } from './modules/scheduling/scheduling.module.js';
 import { MatchSheetModule } from './modules/match-sheet/match-sheet.module.js';
 import { FinanceModule } from './modules/finance/finance.module.js';
 import { RefereesModule } from './modules/referees/referees.module.js';
@@ -80,6 +81,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
     MatchLogModule,
     MatchIncidentsModule,
     AgendaModule,
+    SchedulingModule,
     MatchSheetModule,
     FinanceModule,
   ],

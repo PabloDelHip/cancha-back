@@ -14,6 +14,7 @@ import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { AppModule } from '../app.module.js';
+import { assertConfirmedDb, loadAppEnv } from '../common/utils/db-target.js';
 import { CloudinaryService } from '../modules/media/cloudinary.service.js';
 import { MatchEvidence } from '../modules/match-sheet/schemas/match-evidence.schema.js';
 import { cleanupPlan, EVIDENCE_FOLDER } from '../modules/match-sheet/evidence-rules.js';
@@ -22,6 +23,9 @@ import { EvidenceStatus } from '../common/enums/index.js';
 async function main() {
   const logger = new Logger('EvidenceCleanup');
   const apply = process.argv.includes('--apply');
+  // 6C: destino comprobado ANTES de conectar (sin mostrar credenciales); remoto = CONFIRM_DB=<base>.
+  const env = loadAppEnv();
+  if (apply) logger.log(`Base: ${assertConfirmedDb(env.uri, 'La limpieza de evidencias').label}`);
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   Logger.overrideLogger(['log', 'error', 'warn']);
   try {

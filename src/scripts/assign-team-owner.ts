@@ -15,6 +15,7 @@ import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { AppModule } from '../app.module.js';
+import { assertConfirmedDb, loadAppEnv } from '../common/utils/db-target.js';
 import { TeamAdminsService } from '../modules/teams/team-admins.service.js';
 import { User } from '../modules/users/schemas/user.schema.js';
 import { normalizeEmail } from '../modules/users/users.service.js';
@@ -34,6 +35,9 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  // 6C: destino comprobado ANTES de conectar (sin mostrar credenciales); remoto = CONFIRM_DB=<base>.
+  const env = loadAppEnv();
+  logger.log(`Base: ${assertConfirmedDb(env.uri, 'La asignación de propietario').label}`);
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   Logger.overrideLogger(['log', 'error', 'warn']);
   try {

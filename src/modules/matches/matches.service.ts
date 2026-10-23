@@ -42,6 +42,7 @@ import { assertStarted, OwnershipService } from '../../common/authorization/owne
 import { Permission } from '../../common/authorization/permissions.js';
 import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import { CompetitionService, toStaged } from '../competition/competition.service.js';
+import { SchedulingService } from '../scheduling/scheduling.service.js';
 import type { AuthUser } from '../auth/auth.types.js';
 
 @Injectable()
@@ -68,6 +69,7 @@ export class MatchesService {
     private readonly log: MatchLogService,
     private readonly access: TournamentAccessService,
     private readonly incidents: MatchIncidentsService,
+    private readonly scheduling: SchedulingService,
   ) {}
 
   async findAll(query: MatchQueryDto, viewer: AuthUser | null = null) {
@@ -156,6 +158,12 @@ export class MatchesService {
         changed: true,
       });
       warnings = field.warnings;
+      // 6A: restricciones de calendario obligatorias (409) y preferencias (avisos).
+      if (rulesApply(dto.status ?? MatchStatus.SCHEDULED)) {
+        warnings = [...warnings, ...(await this.scheduling.enforce(session, dto.tournamentId, [
+          { key: 'new', matchId: null, homeTeamId: dto.homeTeamId, awayTeamId: dto.awayTeamId, date: dto.date, time: dto.time, fieldId: field.fieldId?.toHexString() ?? null, round: dto.round },
+        ]))];
+      }
       const [created] = await this.matches.create(
         [
           {
@@ -306,6 +314,15 @@ export class MatchesService {
         time: dto.time ?? current.time,
         status,
       });
+      // 6A: un horario, equipos o cancha nuevos (o volver a programarlo) deben cumplir las
+      // restricciones del torneo de destino. Lo que no cambia no se revalida (no se invalida lo ya
+      // programado al configurar restricciones después).
+      const reenters = rulesApply(status) && !rulesApply(current.status);
+      if (rulesApply(status) && (reschedules || changesTeams || fieldChanged || reenters)) {
+        warnings = [...warnings, ...(await this.scheduling.enforce(session, tournamentId, [
+          { key: id, matchId: id, homeTeamId, awayTeamId, date: dto.date ?? current.date, time: dto.time ?? current.time, fieldId: field.fieldId?.toHexString() ?? null, round },
+        ]))];
+      }
 
       const { reason: _reason, release: _release, ...fields } = dto;
       const update: Record<string, unknown> = { ...fields };
@@ -315,6 +332,8 @@ export class MatchesService {
       if (dto.status === MatchStatus.POSTPONED && current.status !== MatchStatus.POSTPONED) {
         update.postponedFrom = { date: current.date, time: current.time };
       }
+      // 6C: «por programar» solo mientras sigue pospuesto; al programarlo (o cancelarlo) deja de serlo.
+      if (current.pendingSchedule && status !== MatchStatus.POSTPONED) update.pendingSchedule = false;
       if (dto.tournamentId) update.tournamentId = toObjectId(dto.tournamentId);
       if (dto.homeTeamId) update.homeTeamId = toObjectId(dto.homeTeamId);
       if (dto.awayTeamId) update.awayTeamId = toObjectId(dto.awayTeamId);
@@ -625,9 +644,10 @@ export class MatchesService {
    * Solo cuenta lo que el cambio CREA: alguien que deja de estar inscrito con su equipo en la fecha,
    * o un conflicto de misma fecha (día o jornada) que antes no existía. Lo ya autorizado o
    * anterior no bloquea. Devuelve las incidencias disciplinarias de antes, para compararlas tras
-   * escribir (`DisciplineService.checkMove`); null si no hay participaciones.
+   * escribir (`DisciplineService.checkMove`); null si no hay participaciones. También la usa la
+   * reprogramación parcial (6C, match-reschedule.service.ts).
    */
-  private async assertPlacementKeepsEligibility(current: Match & { _id: Types.ObjectId }, next: { date: string; round: number }, session: ClientSession) {
+  async assertPlacementKeepsEligibility(current: Match & { _id: Types.ObjectId }, next: { date: string; round: number }, session: ClientSession) {
     const registered = [...(await registeredIn({ stats: this.stats, sheets: this.sheets }, session, current._id))].map((k) => {
       const [playerId, teamId] = k.split(':');
       return { playerId, teamId };
@@ -821,6 +841,9 @@ function cardsError(s: { yellowCards: number; redCards: number; sendOff?: SendOf
 }
 
 /** Advertencias de disponibilidad de la cancha (no bloquean): solo si las hay, para no cambiar la respuesta. */
+/** 6A: las restricciones de calendario aplican a lo que se programa o se está jugando. */
+const rulesApply = (status: MatchStatus) => status === MatchStatus.SCHEDULED || status === MatchStatus.LIVE;
+
 function withWarnings<T extends object>(match: T, warnings: string[]) {
   return warnings.length ? { ...match, warnings } : match;
 }

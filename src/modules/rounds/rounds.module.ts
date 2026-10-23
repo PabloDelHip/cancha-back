@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Models } from '../../common/models.js';
 import { MatchLogModule } from '../match-log/match-log.module.js';
+import { SchedulingModule } from '../scheduling/scheduling.module.js';
 import { RoundsController } from './rounds.controller.js';
 import { RoundsService } from './rounds.service.js';
 import { ScheduleService } from './schedule.service.js';
@@ -9,6 +10,7 @@ import { ScheduleService } from './schedule.service.js';
 @Module({
   imports: [
     MatchLogModule,
+    SchedulingModule,
     MongooseModule.forFeature([
       Models.round,
       Models.match,

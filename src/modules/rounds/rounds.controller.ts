@@ -73,7 +73,7 @@ export class RoundsController {
     summary: 'Generar el calendario de liga (una vuelta o ida y vuelta)',
     description:
       'Crea jornadas y partidos con los equipos inscritos, en una transacción. 409 si hay partidos jugados/en juego, ' +
-      'o si hay partidos programados sin replaceExisting: true.',
+      'o si hay partidos programados sin replaceExisting: true. Con `assignments` (6B) confirma una propuesta: 409 PROPOSAL_STALE si ya no coincide con el formato.',
   })
   @ApiForbiddenResponse({ description: 'El torneo pertenece a otro organizador' })
   @ApiConflictResponse({ description: 'Calendario con historia, sin confirmación de reemplazo o torneo finalizado' })
@@ -83,5 +83,21 @@ export class RoundsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.schedule.generate(id, dto, user);
+  }
+
+  @Post('tournaments/:id/schedule/proposal')
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('tournaments')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Propuesta de calendario (6B): fecha, hora y cancha para cada partido del formato, sin guardar',
+    description:
+      'Respeta las restricciones obligatorias e intenta cumplir las preferencias. Lo que no cabe vuelve en `unscheduled` con sus motivos. ' +
+      'Para guardarla, POST /tournaments/:id/schedule con los mismos parámetros y `assignments` (se revalida todo).',
+  })
+  @ApiForbiddenResponse({ description: 'Sin permiso de programar (o de asignar canchas, si se piden)' })
+  @ApiConflictResponse({ description: 'Calendario con historia' })
+  proposal(@Param('id', IsObjectIdPipe) id: string, @Body() dto: GenerateScheduleDto, @CurrentUser() user: AuthUser) {
+    return this.schedule.proposal(id, dto, user);
   }
 }

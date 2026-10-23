@@ -104,6 +104,26 @@ export class MatchLogService {
     await this.write(session, actor, { tournamentId: match.tournamentId, matchId: match._id, action, changes, reason });
   }
 
+  /** Entrada del torneo, sin partido (6A: restricciones de calendario). */
+  async tournamentEntry(session: ClientSession, actor: Actor, tournamentId: Types.ObjectId, action: MatchLogAction, changes: Record<string, { from: unknown; to: unknown }>) {
+    await this.write(session, actor, { tournamentId, matchId: null, action, changes });
+  }
+
+  /**
+   * 6B: el cuadro creó un partido sin horario válido (queda pospuesto, pendiente de programar). Es
+   * el único partido creado por el sistema que se registra: el organizador debe saber por qué.
+   */
+  async unscheduledBySystem(session: ClientSession, actor: Actor, doc: Doc, reason: string) {
+    await this.write(session, { ...actor, source: MatchLogSource.SYSTEM }, {
+      tournamentId: doc.tournamentId,
+      matchId: doc._id,
+      action: MatchLogAction.CREATED,
+      cause: MatchLogCause.BRACKET_SYNC,
+      snapshot: snapshotOf(rec(doc)),
+      reason,
+    });
+  }
+
   /** El cuadro reasignó equipos de un cruce (solo si cambiaron). */
   async teamsBySystem(session: ClientSession, actor: Actor, before: Doc, after: Doc) {
     const changes = diff(rec(before), rec(after), ['homeTeamId', 'awayTeamId']);

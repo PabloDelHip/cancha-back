@@ -141,6 +141,15 @@ export class Match {
   postponedFrom: { date: string; time: string } | null;
 
   /**
+   * 6C: partido POSTPONED que NUNCA tuvo horario (calendario guardado con partidos por programar, o
+   * ronda de eliminatoria sin horario válido). Su `date`/`time` son solo la referencia de su jornada:
+   * no se muestran como fecha ni reservan nada. Se apaga al programarlo. Los documentos anteriores no
+   * lo tienen (= false). Ver docs/scheduling-6c.md § Estados.
+   */
+  @Prop({ type: Boolean, default: false })
+  pendingSchedule: boolean;
+
+  /**
    * Ficha técnica cerrada (2D), independiente del estado del partido: congela resultado,
    * estadísticas, alineaciones, sustituciones, árbitros, incidencias y observaciones. Guarda quién
    * la cerró y el marcador que quedó congelado. null = abierta (también los partidos anteriores).

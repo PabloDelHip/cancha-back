@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsMongoId, IsOptional, IsString, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { IsISODateOnly, IsTime, Trim } from '../../../common/validators.js';
+import { SmartScheduleFields } from '../../rounds/dto/round.dto.js';
 
 /** Orden que decide el organizador para un empate sin criterio deportivo (queda registrado). */
 export class TiebreakDto {
@@ -19,7 +20,12 @@ export class TiebreakDto {
 }
 
 /** Generar la fase siguiente (eliminatoria) a partir de la tabla o los grupos terminados. */
-export class AdvancePhaseDto {
+export class AdvancePhaseDto extends SmartScheduleFields {
+  @ApiPropertyOptional({ description: '6B: la vista previa busca también fecha, hora y cancha válidas para cada partido (`proposal`)' })
+  @IsOptional()
+  @IsBoolean()
+  smart?: boolean;
+
   @ApiPropertyOptional({
     description:
       'Armar la eliminatoria a mano: el organizador elige los cruces de cada ronda. No exige la fase anterior terminada ni desempates, y no la congela.',

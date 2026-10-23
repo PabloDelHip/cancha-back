@@ -9,6 +9,7 @@ import {
 } from '../../../common/enums/index.js';
 import { DisciplineRules, DisciplineRulesSchema } from '../../discipline/schemas/discipline-rules.schema.js';
 import { TournamentInformation, TournamentInformationSchema } from './tournament-information.schema.js';
+import { TournamentSchedulingRules, TournamentSchedulingRulesSchema } from '../../scheduling/schemas/scheduling-rules.schema.js';
 import type { TournamentPhase } from '../../competition/types.js';
 
 /** Configuración deportiva. Desempate V1 fijo: puntos → diferencia de goles → goles a favor. */
@@ -197,6 +198,13 @@ export class Tournament {
    */
   @Prop({ type: DisciplineRulesSchema, default: undefined, select: false })
   discipline?: DisciplineRules;
+
+  /**
+   * 6A — restricciones de calendario (administrativo: no se expone en público). Ausente en torneos
+   * anteriores: se lee con `rulesOf()` (sin restricciones).
+   */
+  @Prop({ type: TournamentSchedulingRulesSchema, default: undefined, select: false })
+  scheduling?: TournamentSchedulingRules;
 
   /** Liga a la que pertenece (todo torneo vive en una; null solo en documentos previos a las ligas). */
   @Prop({ type: Types.ObjectId, ref: 'League', default: null, index: true })

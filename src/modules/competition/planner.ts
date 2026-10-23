@@ -199,3 +199,10 @@ export function matchDoc(tournamentId: Types.ObjectId, m: PlannedMatch) {
     penalties: null,
   };
 }
+
+/**
+ * Documento de un partido del calendario: con su horario, o POR PROGRAMAR (6C: POSTPONED +
+ * `pendingSchedule`; fecha y hora = las de referencia de su jornada, no se muestran ni reservan).
+ */
+export const pendingAware = (tid: Types.ObjectId) => (m: PlannedMatch & { fieldId: string | null; pending: boolean }) =>
+  m.pending ? { ...matchDoc(tid, m), status: MatchStatus.POSTPONED, pendingSchedule: true, fieldId: null } : { ...matchDoc(tid, m), fieldId: m.fieldId ? new Types.ObjectId(m.fieldId) : null };

@@ -234,6 +234,8 @@ export enum MatchLogAction {
   DELETED = 'DELETED',
   /** Calendario reemplazado: una entrada con todos los partidos eliminados. */
   SCHEDULE_REPLACED = 'SCHEDULE_REPLACED',
+  /** 6A: restricciones de calendario del torneo o de un equipo (entrada del torneo, sin partido). */
+  SCHEDULING_RULES_UPDATED = 'SCHEDULING_RULES_UPDATED',
 }
 
 /** Quién originó el cambio: el organizador o el sistema (p. ej. el cuadro de eliminatoria). */

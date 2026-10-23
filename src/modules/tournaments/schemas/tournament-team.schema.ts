@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { TeamSchedulingRules, TeamSchedulingRulesSchema } from '../../scheduling/schemas/scheduling-rules.schema.js';
 
 /** 3D — retiro y reincorporación de un equipo inscrito (con motivo, quién y con qué rol). */
 export enum EnrollmentAuditAction {
@@ -53,6 +54,10 @@ export class TournamentTeam {
   /** Interna: motivos y autores del retiro y la reincorporación. Nunca se expone en público. */
   @Prop({ type: [EnrollmentAuditSchema], default: [] })
   audit: EnrollmentAudit[];
+
+  /** 6A — restricciones de calendario del equipo en ESTE torneo. null = sin restricciones. */
+  @Prop({ type: TeamSchedulingRulesSchema, default: null, select: false })
+  scheduling: TeamSchedulingRules | null;
 
   createdAt: Date;
 }

@@ -13,11 +13,15 @@ import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
 import type { Model, Types } from 'mongoose';
 import { AppModule } from '../app.module.js';
+import { assertConfirmedDb, loadAppEnv } from '../common/utils/db-target.js';
 import { Tournament } from '../modules/tournaments/schemas/tournament.schema.js';
 import { LeagueAccessService } from '../common/authorization/league-access.service.js';
 
 async function main() {
   const logger = new Logger('MigrateLeagues');
+  // 6C: destino comprobado ANTES de conectar (sin mostrar credenciales); remoto = CONFIRM_DB=<base>.
+  const env = loadAppEnv();
+  logger.log(`Base: ${assertConfirmedDb(env.uri, 'La migración de ligas').label}`);
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   Logger.overrideLogger(['log', 'error', 'warn']);
   try {

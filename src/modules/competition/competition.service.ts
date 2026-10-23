@@ -16,13 +16,16 @@ import { assertStarted, OwnershipService } from '../../common/authorization/owne
 import { Permission } from '../../common/authorization/permissions.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { bracketSize, knockoutRoundNumber, phaseRounds, reconcile, roundName, tiebreakFor } from './bracket.js';
-import { knockoutMatch, manualBracketSizes, manualKnockoutPhase, matchDoc, planKnockout } from './planner.js';
+import { knockoutMatch, manualBracketSizes, manualKnockoutPhase, matchDoc, pendingAware, planKnockout, type PlannedMatch } from './planner.js';
 import { phasesOf } from './formats.js';
 import { buildStructure, tiebreakRules, type StructureInput } from './structure.js';
 import type { StagedMatch } from './tables.js';
 import { pointsRuleOf } from '../statistics/calculations.js';
 import type { MatchStage, TiebreakDecision, TournamentPhase } from './types.js';
 import type { AdvancePhaseDto, CreateTieDto } from './dto/advance.dto.js';
+import { SchedulingService } from '../scheduling/scheduling.service.js';
+import { addDays } from '../venues/occupancy.js';
+import { applyAssignments, fixtureKey, roundsWithDates } from '../scheduling/auto-scheduler.js';
 
 export const STAGED_MATCH_FIELDS = 'tournamentId round date time status homeTeamId awayTeamId homeScore awayScore stage penalties extraTime';
 
@@ -101,6 +104,7 @@ export class CompetitionService {
     @InjectModel(PlayerMatchStats.name) private readonly stats: Model<PlayerMatchStats>,
     private readonly ownership: OwnershipService,
     private readonly log: MatchLogService,
+    private readonly scheduling: SchedulingService,
   ) {}
 
   /** Torneo + partidos + inscritos + equipos (4 consultas fijas). */
@@ -160,6 +164,7 @@ export class CompetitionService {
    */
   async advance(id: string, dto: AdvancePhaseDto, user: AuthUser) {
     await this.ownership.tournament(id, user, Permission.SCHEDULE);
+    if (dto.assignments?.some((a) => a.fieldId)) await this.ownership.tournament(id, user, Permission.ASSIGNMENTS);
     await this.ownership.inTournament(id, { user, permission: Permission.SCHEDULE }, async (session, status) => {
       assertStarted(status);
       const { tournament, input } = await this.context(id, session);
@@ -180,8 +185,15 @@ export class CompetitionService {
       }
       const tid = toObjectId(id);
       const plan = planNextKnockout(view, tournament.settings, dto, await this.nextRoundNumber(tid, session));
-      await this.rounds.insertMany(plan.rounds.map((r) => ({ tournamentId: tid, ...r })), { session });
-      if (plan.matches.length) await this.matches.insertMany(plan.matches.map((m) => matchDoc(tid, m)), { session });
+      // 6B: horarios de una propuesta confirmada (los mismos partidos que vuelve a planear el servidor).
+      const planned = dto.assignments ? applyAssignments(plan.matches, dto.assignments, dto.allowPending ?? 0) : plan.matches.map((m) => ({ ...m, fieldId: null as string | null, pending: false }));
+      // 6A: la eliminatoria generada cumple las restricciones obligatorias del calendario (o 409).
+      await this.scheduling.enforce(session, tid, proposalsOf(planned.filter((m) => !m.pending)));
+      await this.rounds.insertMany((dto.assignments ? roundsWithDates(plan.rounds, planned) : plan.rounds).map((r) => ({ tournamentId: tid, ...r })), { session });
+      if (planned.length) {
+        const inserted = await this.matches.insertMany(planned.map(pendingAware(tid)), { session });
+        await this.scheduling.assignFields(session, tid, inserted);
+      }
       await this.tournaments.updateOne({ _id: tid }, { $set: { phases: [...phases, plan.phase!] } }, { session });
     });
     return this.structure(id);
@@ -194,6 +206,7 @@ export class CompetitionService {
    */
   async previewAdvance(id: string, dto: AdvancePhaseDto, user: AuthUser) {
     await this.ownership.tournament(id, user, Permission.SCHEDULE);
+    if (dto.smart && dto.fieldIds?.length) await this.ownership.tournament(id, user, Permission.ASSIGNMENTS);
     const { tournament, input, teamMap } = await this.context(id);
 
     const view = buildStructure({ ...input, phases: mergeTiebreaks(tournament.phases ?? [], dto.tiebreaks ?? []) });
@@ -209,6 +222,23 @@ export class CompetitionService {
         ties: (phase.bracket ?? []).filter((t) => t.round === r).map((t) => ({ slot: t.slot, home: t.home, away: t.away })),
       })),
       matches: plan.matches.map((m) => ({ homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId, date: m.date, time: m.time, roundName: plan.rounds.find((x) => x.number === m.round)?.name ?? null })),
+      // 6A: lo que incumpliría (la generación lo rechazaría si hay errores).
+      constraints: (await this.scheduling.evaluateAll(null, id, proposalsOf(plan.matches))).filter((i) => i.errors.length || i.warnings.length),
+      // 6B: horarios válidos para cada partido (se confirman con advance + assignments).
+      proposal: dto.smart
+        ? await this.scheduling.propose(null, id, {
+            fixtures: plan.matches.map((m) => ({ key: fixtureKey(m), round: m.round, homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId })),
+            from: dto.startDate,
+            to: dto.endDate ?? null,
+            days: dto.days,
+            firstKickoff: dto.firstKickoff,
+            lastKickoff: dto.lastKickoff ?? null,
+            step: dto.minutesBetweenMatches > 0 ? dto.minutesBetweenMatches : null,
+            daysBetweenRounds: dto.daysBetweenRounds,
+            fieldIds: dto.fieldIds,
+            parallel: dto.fieldIds?.length ? null : (dto.parallel ?? 1),
+          })
+        : null,
       teams: Object.fromEntries(teamMap),
     };
   }
@@ -309,6 +339,8 @@ export class CompetitionService {
           { upsert: true, session },
         );
       }
+      // 6A: restricciones de calendario obligatorias de los partidos del cruce.
+      await this.scheduling.enforce(session, tid, docs.map((d, i) => ({ key: String(i), matchId: null, homeTeamId: d.match.homeTeamId.toHexString(), awayTeamId: d.match.awayTeamId.toHexString(), date: d.match.date, time: d.match.time, fieldId: null, round: d.number })));
       const inserted = await this.matches.insertMany(docs.map((d) => d.match), { session });
       // Cruce armado a mano: sus partidos se registran como creados por el organizador.
       await this.log.created(session, { userId: user.id }, inserted.map((m) => m.toObject()));
@@ -410,10 +442,51 @@ export class CompetitionService {
           await this.log.teamsBySystem(session, actor, before, after);
         }
       }
-      if (r.create.length) {
-        await this.matches.insertMany(r.create.map((spec) => matchDoc(tournamentId, knockoutMatch(phase, spec))), { session });
-      }
+      for (const spec of r.create) await this.createKnockoutMatch(tournamentId, phase, spec, matches, session, actor);
     }
+  }
+
+  /**
+   * 6B: partido de la ronda siguiente de un cuadro automático. Conserva su horario previsto si cumple
+   * las restricciones y es posterior a los partidos que lo alimentan; si no, busca otro en las dos
+   * semanas siguientes (o dos rondas). Sin horario válido se crea POSPUESTO (pendiente de programar,
+   * no reserva cancha ni horario) y el historial dice por qué: la captura del resultado que lo
+   * desencadenó nunca se bloquea y el avance deportivo se conserva.
+   */
+  private async createKnockoutMatch(
+    tournamentId: Types.ObjectId,
+    phase: TournamentPhase,
+    spec: { round: number; slot: number; leg: number; homeTeamId: string; awayTeamId: string },
+    matches: StagedMatch[],
+    session: ClientSession,
+    actor: Actor,
+  ) {
+    const planned = knockoutMatch(phase, spec);
+    const doc = matchDoc(tournamentId, planned);
+    const s = phase.schedule;
+    if (!s) {
+      await this.matches.insertMany([doc], { session });
+      return;
+    }
+    // Los partidos que lo alimentan: rondas anteriores de la fase y la ida de la misma llave.
+    const feeders = matches.filter(
+      (m) => m.stage?.phase === phase.index && m.stage.tie && (m.stage.tie.round < spec.round || (m.stage.tie.round === spec.round && m.stage.tie.slot === spec.slot && m.stage.tie.leg < spec.leg)),
+    );
+    const last = feeders.map((m) => m.date).sort().pop();
+    const floor = last && addDays(last, 1) > planned.date ? addDays(last, 1) : planned.date;
+    const slot = await this.scheduling.placeAutomatic(session, tournamentId, { key: `${spec.round}|${spec.slot}|${spec.leg}`, round: planned.round, homeTeamId: planned.homeTeamId, awayTeamId: planned.awayTeamId, date: planned.date, time: planned.time }, {
+      floor,
+      spanDays: 2 * Math.max(7, s.daysBetweenRounds),
+      step: s.minutesBetweenMatches > 0 ? s.minutesBetweenMatches : 60,
+      daysBetweenRounds: s.daysBetweenRounds,
+    });
+    if ('reasons' in slot) {
+      const [created] = await this.matches.insertMany([{ ...doc, date: floor, status: MatchStatus.POSTPONED, pendingSchedule: true }], { session });
+      const why = slot.reasons[0]?.message ?? 'no hay un horario que cumpla las restricciones';
+      await this.log.unscheduledBySystem(session, actor, created, `Pendiente de programar: no se encontró horario válido entre el ${floor} y el ${addDays(floor, 2 * Math.max(7, s.daysBetweenRounds) - 1)} (${why}).`);
+      return;
+    }
+    await this.matches.insertMany([{ ...doc, date: slot.date, time: slot.time }], { session });
   }
 
   /**
@@ -561,3 +634,7 @@ function planNextKnockout(view: ReturnType<typeof buildStructure>, settings: Par
   if (roundBase + plan.rounds.length - 1 > 99) throw new BadRequestException('La eliminatoria superaría la jornada 99');
   return plan;
 }
+
+/** Partidos planeados como propuestas para las restricciones de calendario (6A). */
+const proposalsOf = (matches: (PlannedMatch & { fieldId?: string | null })[]) =>
+  matches.map((m, i) => ({ key: String(i), matchId: null, homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId, date: m.date, time: m.time, fieldId: m.fieldId ?? null, round: m.round }));

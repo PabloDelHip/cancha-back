@@ -8,14 +8,14 @@
  * preferencia de lectura `secondaryPreferred`, y solo agrega. No modifica ni borra nada. Usa
  * MONGODB_URI (o el `.env` del backend).
  */
-import { existsSync } from 'node:fs';
 import mongoose from 'mongoose';
+import { describeDbTarget, loadAppEnv } from '../common/utils/db-target.js';
 import { orphanReport } from './orphan-report.js';
 
 async function main() {
-  if (!process.env.MONGODB_URI && existsSync('.env')) process.loadEnvFile('.env');
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error('Falta MONGODB_URI');
+  // Solo lectura: se informa el destino (sin credenciales), sin exigir confirmación.
+  const { uri } = loadAppEnv();
+  console.error(`Base: ${describeDbTarget(uri).label}`);
   const conn = await mongoose.createConnection(uri, { autoIndex: false, autoCreate: false, readPreference: 'secondaryPreferred' }).asPromise();
   try {
     const findings = await orphanReport(conn.db!);
