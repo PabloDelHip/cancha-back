@@ -28,6 +28,7 @@ import { VenuesModule } from './modules/venues/venues.module.js';
 import { DisciplineModule } from './modules/discipline/discipline.module.js';
 import { MediaModule } from './modules/media/media.module.js';
 import { AuthorizationModule } from './common/authorization/authorization.module.js';
+import { ReportsModule } from './modules/reports/reports.module.js';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
 
 @Module({
@@ -84,6 +85,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
     SchedulingModule,
     MatchSheetModule,
     FinanceModule,
+    ReportsModule,
   ],
   providers: [
     // Autenticación por defecto en TODAS las rutas; las de lectura pública usan @Public().
