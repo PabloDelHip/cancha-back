@@ -86,6 +86,8 @@ export interface TeamProfileInput {
   globalRoster?: { playerId: string; joinedAt: string }[];
   /** Equipos de esos torneos (nombres para la tabla y los partidos). */
   teams: Map<string, TeamRef>;
+  /** 10C: equipo en SU torneo (nombre histórico de los finalizados); sin él, `teams`. */
+  teamIn?: (tournamentId: string, teamId: string) => TeamRef | null;
 }
 
 export interface TeamRecord {
@@ -153,10 +155,11 @@ export function buildTeamProfile(input: TeamProfileInput) {
     .filter((m) => m.homeTeamId === team.id || m.awayTeamId === team.id)
     .sort(byKickoff);
 
-  const nameOf = (id: string) => teams.get(id)?.name ?? '';
+  const teamAt = (tournamentId: string, id: string) => input.teamIn?.(tournamentId, id) ?? teams.get(id) ?? null;
 
   const competitions = tournamentList
     .map((t) => {
+      const nameOf = (id: string) => teamAt(t.id, id)?.name ?? '';
       const all = input.tournamentMatches.get(t.id) ?? [];
       const current = t.status !== 'FINISHED' && input.enrolledTournamentIds.has(t.id);
 
@@ -241,7 +244,7 @@ export function buildTeamProfile(input: TeamProfileInput) {
   const playerStats = teamPlayerStats(input, players, tournaments, teams);
 
   const finished = teamMatches.filter(isFinished).reverse();
-  const toMatch = (m: TPMatch) => teamMatch(m, team.id, tournaments, teams);
+  const toMatch = (m: TPMatch) => teamMatch(m, team.id, tournaments, teams, input.teamIn);
 
   const years = new Map<string, { tournament: { id: string; name: string; status: string }; record: TeamRecord; finalStanding: TeamStanding | null; current: boolean }[]>();
   for (const c of competitions) {
@@ -369,7 +372,7 @@ function teamPlayerStats(input: TeamProfileInput, players: Map<string, PublicPla
     if (m && (s.yellowCards || s.redCards)) {
       const t = tournaments.get(m.tournamentId);
       row.cards.push({
-        match: { id: m.id, date: m.date, tournament: t ? { id: t.id, name: t.name } : null, opponent: teams.get(m.homeTeamId === teamId ? m.awayTeamId : m.homeTeamId) ?? null },
+        match: { id: m.id, date: m.date, tournament: t ? { id: t.id, name: t.name } : null, opponent: (input.teamIn?.(m.tournamentId, m.homeTeamId === teamId ? m.awayTeamId : m.homeTeamId) ?? teams.get(m.homeTeamId === teamId ? m.awayTeamId : m.homeTeamId)) ?? null },
         yellow: s.yellowCards ?? 0,
         red: s.redCards ?? 0,
       });
@@ -424,8 +427,9 @@ export function rankContributors(
 }
 
 /** Partido desde el lado del equipo del perfil. */
-export function teamMatch(m: TPMatch, teamId: string, tournaments: Map<string, TournamentRef>, teams: Map<string, TeamRef>) {
+export function teamMatch(m: TPMatch, teamId: string, tournaments: Map<string, TournamentRef>, teams: Map<string, TeamRef>, teamIn?: (tournamentId: string, teamId: string) => TeamRef | null) {
   const t = tournaments.get(m.tournamentId);
+  const team = (id: string) => teamIn?.(m.tournamentId, id) ?? teams.get(id) ?? null;
   return {
     id: m.id,
     date: m.date,
@@ -433,8 +437,8 @@ export function teamMatch(m: TPMatch, teamId: string, tournaments: Map<string, T
     round: m.round,
     status: m.status,
     tournament: t ? { id: t.id, name: t.name } : null,
-    homeTeam: teams.get(m.homeTeamId) ?? null,
-    awayTeam: teams.get(m.awayTeamId) ?? null,
+    homeTeam: team(m.homeTeamId),
+    awayTeam: team(m.awayTeamId),
     homeScore: m.homeScore,
     awayScore: m.awayScore,
     result: isFinished(m) ? resultFor(m, teamId) : null,

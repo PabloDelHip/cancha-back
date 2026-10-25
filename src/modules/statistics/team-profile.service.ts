@@ -1,3 +1,5 @@
+import { teamInWith } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -66,6 +68,7 @@ export class TeamProfileService {
     @InjectModel(TournamentTeam.name) private readonly enrollments: Model<TournamentTeam>,
     @InjectModel(TeamRoster.name) private readonly globalRoster: Model<TeamRoster>,
     private readonly access: TournamentAccessService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   async profile(id: string, viewer: AuthUser | null = null) {
@@ -102,7 +105,11 @@ export class TeamProfileService {
     ]);
     const matches = allMatches.map(toTPMatch);
     const teamIds = new Set([...tournamentTeams.map((e) => e.teamId.toHexString()), ...matches.flatMap((m) => [m.homeTeamId, m.awayTeamId]), id]);
-    const teamDocs = await this.teams.find({ _id: { $in: [...teamIds].map(toObjectId) } }).select('name shortName logoUrl colors').lean();
+    const [teamDocs, names] = await Promise.all([
+      this.teams.find({ _id: { $in: [...teamIds].map(toObjectId) } }).select('name shortName logoUrl colors').lean(),
+      this.identity.namesFor(tournaments.map((t) => t._id)),
+    ]);
+    const teamsMap = new Map(teamDocs.map((t) => [t._id.toHexString(), teamRef(t)]));
 
     const byTournament = new Map<string, TPMatch[]>();
     for (const m of matches) byTournament.set(m.tournamentId, [...(byTournament.get(m.tournamentId) ?? []), m]);
@@ -150,7 +157,9 @@ export class TeamProfileService {
         active: m.active,
       })),
       players: new Map(players.map((p) => [p._id.toHexString(), publicPlayer(p)])),
-      teams: new Map(teamDocs.map((t) => [t._id.toHexString(), teamRef(t)])),
+      teams: teamsMap,
+      // 10C: rivales y tablas de cada temporada finalizada con los nombres con que se jugó.
+      teamIn: teamInWith(teamsMap, names),
       globalRoster: roster.map((r) => ({ playerId: r.playerId.toHexString(), joinedAt: r.joinedAt })),
     });
   }
@@ -170,13 +179,14 @@ export class TeamProfileService {
       this.matches.countDocuments(filter),
     ]);
     const matches = rows.map(toTPMatch);
-    const [teamDocs, tournaments] = await Promise.all([
+    const [teamDocs, tournaments, names] = await Promise.all([
       this.teams.find({ _id: { $in: [...new Set(matches.flatMap((m) => [m.homeTeamId, m.awayTeamId]))].map(toObjectId) } }).select('name shortName logoUrl colors').lean(),
       this.tournaments.find({ _id: { $in: [...new Set(matches.map((m) => m.tournamentId))].map(toObjectId) } }).select('name status category format startDate endDate dataCoverage').lean(),
+      this.identity.namesFor(matches.map((m) => m.tournamentId)),
     ]);
     const teamsById = new Map(teamDocs.map((t) => [t._id.toHexString(), teamRef(t)]));
     const tournamentsById = new Map(tournaments.map((t) => [t._id.toHexString(), tournamentRef(t)]));
-    return paginated(matches.map((m) => teamMatch(m, id, tournamentsById, teamsById)), total, query);
+    return paginated(matches.map((m) => teamMatch(m, id, tournamentsById, teamsById, teamInWith(teamsById, names))), total, query);
   }
 
 }

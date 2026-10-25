@@ -1,3 +1,5 @@
+import { teamMapWithNames } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -8,7 +10,7 @@ import { Match } from '../matches/schemas/match.schema.js';
 import { Round } from '../rounds/schemas/round.schema.js';
 import { PlayerMatchStats } from '../matches/schemas/player-match-stats.schema.js';
 import { Team } from '../teams/schemas/team.schema.js';
-import { CompetitionSystem, KnockoutTiebreak, MatchLogCause, MatchLogSource, MatchStatus, PhaseType } from '../../common/enums/index.js';
+import { CompetitionSystem, KnockoutTiebreak, MatchLogCause, MatchLogSource, MatchStatus, PhaseType, TournamentStatus } from '../../common/enums/index.js';
 import { MatchLogService, type Actor } from '../match-log/match-log.service.js';
 import { toObjectId } from '../../common/utils/serialize.js';
 import { teamRef } from '../../common/utils/public.js';
@@ -105,6 +107,7 @@ export class CompetitionService {
     private readonly ownership: OwnershipService,
     private readonly log: MatchLogService,
     private readonly scheduling: SchedulingService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   /** Torneo + partidos + inscritos + equipos (4 consultas fijas). */
@@ -124,7 +127,9 @@ export class CompetitionService {
       .select('name shortName logoUrl colors')
       .session(session)
       .lean();
-    const teamMap = new Map(teams.map((t) => [t._id.toHexString(), teamRef(t)]));
+    // 10C: finalizado con foto → nombres con que se jugó (también en el desempate por nombre).
+    const names = tournament.status === TournamentStatus.FINISHED ? await this.identity.names(tid, session) : null;
+    const teamMap = teamMapWithNames(new Map(teams.map((t) => [t._id.toHexString(), teamRef(t)])), names);
     const withdrawn = enrolled.filter((e) => e.withdrawnAt).map((e) => e.teamId.toHexString());
     const input = structureInput(tournament, matches, teamIds, (id) => teamMap.get(id)?.name ?? '', withdrawn);
     return { tournament, matches, teamMap, input };
@@ -597,7 +602,7 @@ export class CompetitionService {
   }
 
   /** Los formatos con eliminatoria requieren un campeón antes de finalizar. */
-  async finishBlockers(tournamentId: Types.ObjectId, session: ClientSession): Promise<string[]> {
+  async finishBlockers(tournamentId: Types.ObjectId, session: ClientSession | null = null): Promise<string[]> {
     const { input } = await this.context(tournamentId, session);
     if (input.system === CompetitionSystem.LEAGUE) return [];
     const view = buildStructure(input);

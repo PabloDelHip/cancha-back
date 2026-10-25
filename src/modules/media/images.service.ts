@@ -9,6 +9,12 @@ export interface ImageFields {
   publicId: string;
 }
 
+/**
+ * 10C: `keep(url)` = la imagen que se reemplaza sigue en uso en otro lado (p. ej. el escudo con que
+ * un equipo jugó un torneo finalizado): se deja en Cloudinary en lugar de borrarla.
+ */
+export type KeepImage = (previousUrl: string) => Promise<boolean>;
+
 /** Solo se escriben los dos campos de imagen: el modelo concreto da igual aquí. */
 type AnyModel = Model<Record<string, unknown>>;
 const asModel = <T>(model: Model<T>) => model as unknown as AnyModel;
@@ -33,27 +39,35 @@ export class ImagesService {
     fields: ImageFields,
     file: UploadedImage | undefined,
     preset: ImagePreset,
+    keep?: KeepImage,
   ) {
     assertImage(file);
     const stored = await this.cloudinary.upload(file, preset);
     const previous = await asModel(model)
       .findByIdAndUpdate(id, { $set: { [fields.url]: stored.url, [fields.publicId]: stored.publicId } }, { returnDocument: 'before' })
-      .select(fields.publicId)
+      .select(`${fields.url} ${fields.publicId}`)
       .lean<Record<string, unknown>>();
     if (!previous) {
       await this.cloudinary.destroy(stored.publicId);
       throw new NotFoundException('El recurso ya no existe');
     }
-    await this.cloudinary.destroy(previous[fields.publicId] as string | null);
+    await this.discard(previous, fields, keep);
   }
 
   /** Quita la imagen (URL y public_id a null) y la borra de Cloudinary si era nuestra. */
-  async remove<T>(model: Model<T>, id: string, fields: ImageFields) {
+  async remove<T>(model: Model<T>, id: string, fields: ImageFields, keep?: KeepImage) {
     const previous = await asModel(model)
       .findByIdAndUpdate(id, { $set: { [fields.url]: null, [fields.publicId]: null } }, { returnDocument: 'before' })
-      .select(fields.publicId)
+      .select(`${fields.url} ${fields.publicId}`)
       .lean<Record<string, unknown>>();
     if (!previous) throw new NotFoundException('El recurso ya no existe');
+    await this.discard(previous, fields, keep);
+  }
+
+  /** Borra de Cloudinary la imagen reemplazada, salvo que siga en uso (`keep`). */
+  private async discard(previous: Record<string, unknown>, fields: ImageFields, keep?: KeepImage) {
+    const url = previous[fields.url] as string | null | undefined;
+    if (keep && url && (await keep(url))) return;
     await this.cloudinary.destroy(previous[fields.publicId] as string | null);
   }
 }

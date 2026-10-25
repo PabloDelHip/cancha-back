@@ -1,3 +1,5 @@
+import { teamInWith } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -100,6 +102,7 @@ export class PlayerProfileService {
     @InjectModel(Match.name) private readonly matches: Model<Match>,
     @InjectModel(TournamentTeam.name) private readonly enrollments: Model<TournamentTeam>,
     private readonly access: TournamentAccessService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   async profile(playerId: string, viewer: AuthUser | null = null) {
@@ -186,6 +189,7 @@ export class PlayerProfileService {
       }),
     );
 
+    const teamsMap = new Map(teams.map((t) => [t._id.toHexString(), teamRef(t)]));
     return buildPlayerProfile({
       player: publicPlayer(player),
       entries,
@@ -198,7 +202,9 @@ export class PlayerProfileService {
         active: m.active,
       })),
       tournaments: new Map(tournaments.map((t) => [t._id.toHexString(), tournamentRef(t)])),
-      teams: new Map(teams.map((t) => [t._id.toHexString(), teamRef(t)])),
+      teams: teamsMap,
+      // 10C: equipo y rivales de cada temporada finalizada con los nombres con que se jugó.
+      teamIn: teamInWith(teamsMap, await this.identity.namesFor(tournaments.map((t) => t._id))),
       competitionContexts,
       tournamentGoals,
     });

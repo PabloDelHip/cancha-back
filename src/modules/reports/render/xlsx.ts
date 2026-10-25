@@ -166,6 +166,7 @@ export function renderXlsx(doc: ReportDoc, timeZone: string): Buffer {
     ['Fechas', doc.tournament.dates],
     ...(doc.currency ? [['Moneda', doc.currency] as [string, string]] : []),
     ['Filtros', doc.filters.length ? doc.filters.join(' · ') : 'Ninguno'],
+    ...(doc.namesNote ? [['Nombres', doc.namesNote] as [string, string]] : []),
     ['Generado', `${humanStamp(doc.generatedAt, timeZone)} (${timeZone})`],
     ['Generado por', 'Kisokar'],
   ];

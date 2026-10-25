@@ -1,3 +1,6 @@
+import { TournamentStatus } from '../../common/enums/index.js';
+import { withTeamName } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -76,6 +79,7 @@ export class FinanceService {
     private readonly ownership: OwnershipService,
     private readonly access: TournamentAccessService,
     private readonly teamAccess: TeamAccessService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   async create(tournamentId: string, dto: CreateFinanceEntryDto, user: AuthUser) {
@@ -151,7 +155,9 @@ export class FinanceService {
       ]),
     ]);
     const ids = [...new Set([...enrolled.map((e) => e.teamId.toHexString()), ...byTeam.keys()])];
-    const names = new Map((await this.teams.find({ _id: { $in: ids.map(toObjectId) } }).select('name').lean()).map((t) => [t._id.toHexString(), t.name]));
+    // 10C: torneo finalizado → el nombre del equipo con que se jugó (los importes no cambian).
+    const hist = tournament.status === TournamentStatus.FINISHED ? await this.identity.names(tid) : null;
+    const names = new Map((await this.teams.find({ _id: { $in: ids.map(toObjectId) } }).select('name').lean()).map((t) => [t._id.toHexString(), withTeamName({ name: t.name }, t._id.toHexString(), hist).name]));
     const accounts = ids
       .map((id) => {
         const e = enrolled.find((x) => x.teamId.toHexString() === id);

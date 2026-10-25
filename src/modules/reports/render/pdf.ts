@@ -129,6 +129,7 @@ export function renderPdf(report: ReportDoc, timeZone: string): Doc {
   ].filter(Boolean);
   doc.font(FONT.regular).fontSize(SIZE.small).fillColor(C.muted).text(pdfText(meta.join('   ·   ')), MARGIN, doc.y, { width });
   if (report.filters.length) doc.text(pdfText(`Filtros: ${report.filters.join(' · ')}`), MARGIN, doc.y + 2, { width });
+  if (report.namesNote) doc.text(pdfText(report.namesNote), MARGIN, doc.y + 2, { width });
   doc.rect(MARGIN, doc.y + 6, width, 3).fill(C.accent);
   doc.y += 18;
 

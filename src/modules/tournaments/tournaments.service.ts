@@ -1,3 +1,6 @@
+import { withTeamName } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
+import { closureBlockers } from './closure.js';
 import {
   BadRequestException,
   ConflictException,
@@ -92,6 +95,7 @@ export class TournamentsService {
     private readonly log: MatchLogService,
     private readonly access: TournamentAccessService,
     private readonly incidents: MatchIncidentsService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   async findOwned(id: string, user: AuthUser) {
@@ -299,6 +303,9 @@ export class TournamentsService {
         throw new ConflictException({ statusCode: 409, error: 'Conflict', message: blockers.join('. '), blockers });
       }
       const summary = await this.summary(id, session);
+      // 10A: un partido en juego impide cerrar (quedaría «En vivo» para siempre). Ver closure.ts.
+      const live = closureBlockers(status, [], summary.live);
+      if (live.length) throw new ConflictException({ statusCode: 409, error: 'Conflict', message: live.map((b) => b.message).join('. '), blockers: live.map((b) => b.message), summary });
       if (summary.pending > 0 && !dto.allowPendingMatches) {
         throw new ConflictException({
           statusCode: 409,
@@ -307,8 +314,16 @@ export class TournamentsService {
           summary,
         });
       }
+      // 10A: el cierre queda registrado (quién, rol, cuándo y cuántos partidos quedaban sin jugar).
+      const role = await this.access.roleOf(id, user.id, session);
+      // 10C: los nombres con que se jugó (liga, equipos, jugadores), en la misma transacción.
+      const identity = await this.identity.build(id, session);
       const tournament = await this.tournaments
-        .findByIdAndUpdate(id, { status: TournamentStatus.FINISHED }, { returnDocument: 'after', session })
+        .findByIdAndUpdate(
+          id,
+          { status: TournamentStatus.FINISHED, finishedAt: new Date(), finishedBy: toObjectId(user.id), finishedRole: role, pendingAtFinish: summary.pending, identity },
+          { returnDocument: 'after', session },
+        )
         .lean();
       return { tournament: serialize(withCoverage(tournament!)), summary };
     });
@@ -391,16 +406,20 @@ export class TournamentsService {
   /** Equipos inscritos en un torneo, con los datos del equipo. */
   async listTeams(tournamentId: string) {
     await this.findOne(tournamentId);
-    const rows = await this.enrollments
-      .find({ tournamentId: toObjectId(tournamentId) })
-      .populate<{ teamId: WithId<Team> }>('teamId')
-      .lean();
+    const [rows, hist] = await Promise.all([
+      this.enrollments
+        .find({ tournamentId: toObjectId(tournamentId) })
+        .populate<{ teamId: WithId<Team> }>('teamId')
+        .lean(),
+      this.identity.names(tournamentId),
+    ]);
+    // 10C: en un torneo finalizado, cada equipo con el nombre, escudo y colores con que se jugó.
     return rows
       .map(({ teamId: team, audit: _audit, ...rest }) => ({
         ...serialize(rest),
         withdrawnAt: rest.withdrawnAt ?? null,
         teamId: serialize(team).id,
-        team: serialize(team),
+        team: withTeamName(serialize(team), serialize(team).id, hist),
       }))
       .sort((a, b) => a.team.name.localeCompare(b.team.name));
   }

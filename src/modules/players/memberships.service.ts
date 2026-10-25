@@ -1,3 +1,5 @@
+import { withPlayerName, withTeamName } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import {
   BadRequestException,
   ConflictException,
@@ -82,6 +84,7 @@ export class MembershipsService {
     private readonly ownership: OwnershipService,
     private readonly teamAccess: TeamAccessService,
     private readonly access: TournamentAccessService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   async list(query: MembershipQueryDto, viewer: AuthUser | null = null) {
@@ -651,18 +654,22 @@ export class MembershipsService {
       .populate('teamId')
       .populate('tournamentId', 'name status startDate endDate dataCoverage')
       .lean<Populated[]>();
-    return rows
-      .filter((r) => r.playerId && r.teamId && r.tournamentId)
-      .map(({ playerId: player, teamId: team, tournamentId: tournament, audit, ...m }) => ({
+    const valid = rows.filter((r) => r.playerId && r.teamId && r.tournamentId);
+    // 10C: en torneos finalizados, jugador y equipo con los nombres con que se jugó.
+    const names = await this.identity.namesFor(valid.map((r) => r.tournamentId._id));
+    return valid.map(({ playerId: player, teamId: team, tournamentId: tournament, audit, ...m }) => {
+      const n = names.get(tournament._id.toHexString());
+      return {
         ...serialize(m),
         transferredFrom: transferredFrom({ audit }),
         playerId: player._id.toHexString(),
         teamId: team._id.toHexString(),
         tournamentId: tournament._id.toHexString(),
-        player: publicPlayer(player),
-        team: serialize(team),
+        player: withPlayerName(publicPlayer(player), player._id.toHexString(), n),
+        team: withTeamName(serialize(team), team._id.toHexString(), n),
         tournament: serialize(withCoverage(tournament)),
-      }));
+      };
+    });
   }
 
   private async assertJerseyFree(

@@ -1,3 +1,5 @@
+import { withTeamName, withPlayerName } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -43,6 +45,7 @@ import { renderCsv } from './render/csv.js';
 import { renderPdf } from './render/pdf.js';
 import { renderXlsx } from './render/xlsx.js';
 import { fetchLogo } from './render/logo.js';
+import { runnerUpOf } from '../tournaments/closure.js';
 
 type Filter = 'phase' | 'group' | 'round' | 'teamId' | 'from' | 'to' | 'status' | 'includeInactive';
 
@@ -179,6 +182,7 @@ export class ReportsService {
     private readonly competition: CompetitionService,
     private readonly discipline: DisciplineService,
     private readonly finance: FinanceService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   /** Catálogo con lo que este usuario puede exportar en el torneo. */
@@ -272,7 +276,15 @@ export class ReportsService {
   /** `max`: tope de filas del formato pedido; las fuentes grandes se cuentan ANTES de cargarse (8C). */
   private async build(id: ReportId, t: Tournament & { _id: Types.ObjectId }, q: ReportQueryDto, user: AuthUser, max: number): Promise<ReportDoc> {
     const tid = t._id;
-    const [league, logo] = await Promise.all([this.leagueName(t.leagueId), fetchLogo(t.logoUrl)]);
+    const [liveLeague, logo, hist] = await Promise.all([this.leagueName(t.leagueId), fetchLogo(t.logoUrl), this.identity.names(tid)]);
+    // 10C: liga con su nombre al cerrar (la liga por defecto sigue sin mostrarse) y aviso de qué nombres se usan.
+    const league = liveLeague && hist?.leagueName ? hist.leagueName : liveLeague;
+    const namesNote =
+      t.status !== TournamentStatus.FINISHED
+        ? null
+        : hist
+          ? `Nombres de equipos y jugadores tal como se jugó (conservados al finalizar el ${humanDate(hist.takenAt.toISOString().slice(0, 10))})`
+          : 'Nombres actuales: el torneo se finalizó antes de que Kisokar conservara los nombres históricos';
     const teamName = q.teamId ? await this.teamName(tid, q.teamId) : null;
     const filters = [
       q.phase !== undefined ? `Fase ${q.phase + 1}` : null,
@@ -326,6 +338,7 @@ export class ReportsService {
       },
       generatedAt,
       filters,
+      namesNote,
       logo,
       logoInitials: initialsOf(t.name),
       orientation: def.orientation,
@@ -360,16 +373,20 @@ export class ReportsService {
     ]);
     const team = enrolled || played || members || money ? await this.teams.findById(id).select('name').lean() : null;
     if (!team) throw new BadRequestException('El equipo no participa en este torneo');
-    return team.name;
+    return withTeamName({ name: team.name }, teamId, await this.identity.names(tid)).name;
   }
 
-  private async names(ids: Iterable<string>) {
+  /** Nombres de equipo; en un torneo finalizado con foto, los nombres con que se jugó (10C). */
+  private async names(ids: Iterable<string>, tid: Types.ObjectId) {
     const list = [...new Set(ids)];
-    const rows = await this.teams
-      .find({ _id: { $in: list.map(toObjectId) } })
-      .select('name')
-      .lean();
-    const map = new Map(rows.map((r) => [r._id.toHexString(), r.name]));
+    const [rows, hist] = await Promise.all([
+      this.teams
+        .find({ _id: { $in: list.map(toObjectId) } })
+        .select('name')
+        .lean(),
+      this.identity.names(tid),
+    ]);
+    const map = new Map(rows.map((r) => [r._id.toHexString(), withTeamName({ name: r.name }, r._id.toHexString(), hist).name]));
     return (id: string) => map.get(id) ?? 'Equipo';
   }
 
@@ -446,7 +463,7 @@ export class ReportsService {
       this.rounds.find({ tournamentId: tid }).select('number name').lean(),
       this.structure(tid),
     ]);
-    const nameOf = await this.names(list.flatMap((m) => [m.homeTeamId.toHexString(), m.awayTeamId.toHexString()]));
+    const nameOf = await this.names(list.flatMap((m) => [m.homeTeamId.toHexString(), m.awayTeamId.toHexString()]), tid);
     const roundName = new Map(rounds.map((r) => [r.number, r.name]));
     const rows: MatchRowInput[] = list.map((m) => ({
       round: m.round,
@@ -483,14 +500,15 @@ export class ReportsService {
       list,
     }));
     if (teamId) entries = entries.filter((e) => e.teamId === teamId);
-    const [players, nameOf] = await Promise.all([
+    const [players, nameOf, hist] = await Promise.all([
       this.players
         .find({ _id: { $in: entries.map((e) => toObjectId(e.playerId)) } })
         .select('firstName lastName')
         .lean(),
-      this.names(entries.map((e) => e.teamId)),
+      this.names(entries.map((e) => e.teamId), tid),
+      this.identity.names(tid),
     ]);
-    const playerName = new Map(players.map((p) => [p._id.toHexString(), `${p.firstName} ${p.lastName}`.trim()]));
+    const playerName = new Map(players.map((p) => ((n) => [p._id.toHexString(), `${n.firstName} ${n.lastName}`.trim()] as const)(withPlayerName(p, p._id.toHexString(), hist))));
     return entries.map((e) => {
       const totals = sumTotals(
         e.list.map((s) => ({
@@ -534,14 +552,15 @@ export class ReportsService {
     tooMany(members.length, max, 'inscripciones');
     const today = todayISODate();
     const blockOf = new Map(blocks.filter((b) => b.until === null || b.until > today).map((b) => [b.playerId.toHexString(), { since: b.since, until: b.until }]));
-    const [players, nameOf] = await Promise.all([
+    const [players, nameOf, hist] = await Promise.all([
       this.players
         .find({ _id: { $in: members.map((m) => m.playerId) } })
         .select('firstName lastName position')
         .lean(),
-      this.names([...enrolled.map((e) => e.teamId.toHexString()), ...members.map((m) => m.teamId.toHexString())]),
+      this.names([...enrolled.map((e) => e.teamId.toHexString()), ...members.map((m) => m.teamId.toHexString())], tid),
+      this.identity.names(tid),
     ]);
-    const player = new Map(players.map((p) => [p._id.toHexString(), p]));
+    const player = new Map(players.map((p) => [p._id.toHexString(), withPlayerName(p, p._id.toHexString(), hist)]));
     const counts = (teamId: string, active: boolean) => members.filter((m) => m.teamId.toHexString() === teamId && m.active === active).length;
     const teams = enrolled
       .map((e) => ({
@@ -778,11 +797,3 @@ function stageLabel(
   return view.phases.length > 1 && stage.phase === 0 ? 'Fase regular' : null;
 }
 
-/** Subcampeón: solo el finalista que perdió una final decidida (como el perfil del equipo). */
-function runnerUpOf(view: StructureView): string | null {
-  const ko = [...view.phases].reverse().find((p) => p.type === PhaseType.KNOCKOUT);
-  if (ko?.type !== PhaseType.KNOCKOUT) return null;
-  const final = ko.rounds.at(-1)?.ties[0];
-  if (!final?.winnerTeamId || !final.homeTeamId || !final.awayTeamId) return null;
-  return final.winnerTeamId === final.homeTeamId ? final.awayTeamId : final.homeTeamId;
-}

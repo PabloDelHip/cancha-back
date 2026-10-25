@@ -11,6 +11,7 @@ import { DisciplineRules, DisciplineRulesSchema } from '../../discipline/schemas
 import { TournamentInformation, TournamentInformationSchema } from './tournament-information.schema.js';
 import { TournamentSchedulingRules, TournamentSchedulingRulesSchema } from '../../scheduling/schemas/scheduling-rules.schema.js';
 import type { TournamentPhase } from '../../competition/types.js';
+import { TournamentIdentity, TournamentIdentitySchema } from './tournament-identity.schema.js';
 
 /** Configuración deportiva. Desempate V1 fijo: puntos → diferencia de goles → goles a favor. */
 @Schema({ _id: false })
@@ -220,6 +221,34 @@ export class Tournament {
    */
   @Prop({ type: Number, default: 0 })
   writeSeq: number;
+
+  /**
+   * 10A — auditoría del cierre: cuándo, quién (y con qué rol) y cuántos partidos quedaban sin jugar
+   * (finalizados con confirmación). null en torneos sin finalizar y en los finalizados antes de 10A.
+   */
+  @Prop({ type: Date, default: null })
+  finishedAt: Date | null;
+
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  finishedBy: Types.ObjectId | null;
+
+  @Prop({ type: String, default: null })
+  finishedRole: string | null;
+
+  @Prop({ type: Number, default: null })
+  pendingAtFinish: number | null;
+
+  /** 10A — torneo del que se tomó la configuración al crear esta temporada (null = creado desde cero). */
+  @Prop({ type: Types.ObjectId, ref: 'Tournament', default: null })
+  previousTournamentId: Types.ObjectId | null;
+
+  /**
+   * 10C — nombres históricos (ver tournament-identity.schema.ts). Interno: se lee con
+   * TournamentIdentityService. null = sin foto (torneos sin finalizar o finalizados antes de 10C):
+   * se usan los nombres actuales.
+   */
+  @Prop({ type: TournamentIdentitySchema, default: null, select: false })
+  identity: TournamentIdentity | null;
 
   createdAt: Date;
   updatedAt: Date;

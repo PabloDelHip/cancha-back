@@ -73,6 +73,8 @@ export interface ProfileInput {
   competitionContexts?: Map<string, CompetitionContext>;
   /** Torneos FINALIZADOS → goles oficiales por jugador (goleador del torneo). */
   tournamentGoals?: Map<string, Map<string, number>>;
+  /** 10C: equipo en SU torneo (nombre histórico de los finalizados); sin él, `teams`. */
+  teamIn?: (tournamentId: string, teamId: string) => TeamRef | null;
 }
 
 export type HonorType = 'CHAMPION' | 'TOP_SCORER' | 'RUNNER_UP';
@@ -120,8 +122,7 @@ export function byMostRecent(a: Pick<ProfileEntry, 'date' | 'time' | 'matchId'>,
 export function buildPlayerProfile(input: ProfileInput) {
   const { tournaments, teams } = input;
   const entries = [...input.entries].sort(byMostRecent);
-  const team = (id: string) => teams.get(id) ?? null;
-  const nameOf = (id: string) => teams.get(id)?.name ?? '';
+  const teamAt = (tournamentId: string, id: string) => input.teamIn?.(tournamentId, id) ?? teams.get(id) ?? null;
 
   // Competición → equipo → { memberships, partidos }
   const groups = new Map<string, Map<string, { memberships: ProfileMembership[]; entries: ProfileEntry[] }>>();
@@ -142,6 +143,7 @@ export function buildPlayerProfile(input: ProfileInput) {
       const finished = tournament.status === FINISHED;
 
       const ctx = input.competitionContexts?.get(tournamentId);
+      const nameOf = (id: string) => teamAt(tournamentId, id)?.name ?? '';
       const structure = ctx && finished ? structureOf(ctx, nameOf) : null;
       const teamParticipations = [...byTeam.entries()].map(([teamId, g]) => {
         const latest = [...g.memberships].sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
@@ -149,7 +151,7 @@ export function buildPlayerProfile(input: ProfileInput) {
         const matchDates = g.entries.map((e) => e.date).sort();
         const ended = g.memberships.map((m) => m.endDate).filter((d): d is string => d !== null).sort();
         return {
-          team: team(teamId),
+          team: teamAt(tournamentId, teamId),
           jerseyNumber: latest?.jerseyNumber ?? null,
           startDate: [...g.memberships.map((m) => m.startDate), ...matchDates].sort()[0] ?? null,
           endDate: current ? null : (ended.at(-1) ?? tournament.endDate ?? matchDates.at(-1) ?? null),
@@ -227,7 +229,7 @@ export function buildPlayerProfile(input: ProfileInput) {
     }));
 
   const totals = entries.reduce(addEntry, emptyLine());
-  const asMatch = (e: ProfileEntry) => profileMatch(e, tournaments, teams);
+  const asMatch = (e: ProfileEntry) => profileMatch(e, tournaments, teams, input.teamIn);
   const records = recordsOf(entries);
   const keeper = input.player.position === PlayerPosition.GOALKEEPER ? goalkeepingOf(entries, teams) : null;
   const perMatch = (n: number) => (totals.appearances ? Math.round((n / totals.appearances) * 100) / 100 : null);
@@ -288,8 +290,9 @@ export interface HistoryItem {
 }
 
 /** Partido del jugador listo para pintar: marcador, contexto y su aporte. */
-export function profileMatch(e: ProfileEntry, tournaments: Map<string, TournamentRef>, teams: Map<string, TeamRef>) {
+export function profileMatch(e: ProfileEntry, tournaments: Map<string, TournamentRef>, teams: Map<string, TeamRef>, teamIn?: (tournamentId: string, teamId: string) => TeamRef | null) {
   const tournament = tournaments.get(e.tournamentId);
+  const team = (id: string) => teamIn?.(e.tournamentId, id) ?? teams.get(id) ?? null;
   return {
     id: e.matchId,
     date: e.date,
@@ -297,8 +300,8 @@ export function profileMatch(e: ProfileEntry, tournaments: Map<string, Tournamen
     round: e.round,
     status: FINISHED,
     tournament: tournament ? { id: tournament.id, name: tournament.name } : null,
-    homeTeam: teams.get(e.homeTeamId) ?? null,
-    awayTeam: teams.get(e.awayTeamId) ?? null,
+    homeTeam: team(e.homeTeamId),
+    awayTeam: team(e.awayTeamId),
     homeScore: e.homeScore,
     awayScore: e.awayScore,
     playerTeamId: e.teamId,

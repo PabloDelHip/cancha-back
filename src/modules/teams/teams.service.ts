@@ -162,7 +162,7 @@ export class TeamsService {
     const updated = await this.teams
       .findByIdAndUpdate(id, { ...dto, ...(replacesUpload ? { logoPublicId: null } : {}) }, { returnDocument: 'after', runValidators: true })
       .lean();
-    if (replacesUpload) await this.cloudinary.destroy(current.logoPublicId);
+    if (replacesUpload && !(current.logoUrl && (await this.inHistory(current.logoUrl)))) await this.cloudinary.destroy(current.logoPublicId);
     return serialize(updated!);
   }
 
@@ -172,7 +172,7 @@ export class TeamsService {
    */
   async setLogo(id: string, file: UploadedImage | undefined, user: AuthUser) {
     await this.access.requireIdentityEdit(id, user, ['logoUrl']);
-    await this.images.replace(this.teams, id, TEAM_LOGO, file, IMAGE_PRESETS.teamLogo);
+    await this.images.replace(this.teams, id, TEAM_LOGO, file, IMAGE_PRESETS.teamLogo, this.inHistory);
     return serialize((await this.teams.findById(id).lean())!);
   }
 
@@ -198,9 +198,12 @@ export class TeamsService {
   /** DELETE /teams/:id/logo — quita el logo (y lo borra de Cloudinary si se subió aquí). */
   async removeLogo(id: string, user: AuthUser) {
     await this.access.requireIdentityEdit(id, user, ['logoUrl']);
-    await this.images.remove(this.teams, id, TEAM_LOGO);
+    await this.images.remove(this.teams, id, TEAM_LOGO, this.inHistory);
     return serialize((await this.teams.findById(id).lean())!);
   }
+
+  /** 10C: escudo con que el equipo jugó un torneo finalizado (está en su foto): no se borra de Cloudinary. */
+  private readonly inHistory = async (logoUrl: string) => !!(await this.tournaments.exists({ 'identity.teams.logoUrl': logoUrl }));
 
   /**
    * Solo se elimina un equipo sin historia: sin partidos y sin jugadores (actuales o pasados).

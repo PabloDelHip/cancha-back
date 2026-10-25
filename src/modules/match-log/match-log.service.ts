@@ -1,3 +1,5 @@
+import { withTeamName } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -46,6 +48,7 @@ export class MatchLogService {
     @InjectModel(MatchEvidence.name) private readonly evidence: Model<MatchEvidence>,
     private readonly ownership: OwnershipService,
     private readonly access: TournamentAccessService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   // ─── Escritura ──────────────────────────────────────────────────────────────
@@ -212,7 +215,7 @@ export class MatchLogService {
     if (!tournamentId) throw new NotFoundException('Partido no encontrado');
     await this.ownership.ownedTournament(tournamentId, user, Permission.LOGS_VIEW);
     const entries = await this.logs.find({ tournamentId, $or: [{ matchId: id }, { affectedMatchIds: id }] }).sort({ createdAt: 1, _id: 1 }).lean();
-    return this.view(entries);
+    return this.view(entries, tournamentId);
   }
 
   /** Historial del torneo, lo más reciente primero (incluye partidos eliminados). */
@@ -221,11 +224,11 @@ export class MatchLogService {
     const filter: Record<string, unknown> = { tournamentId: toObjectId(tournamentId) };
     if (query.deleted) filter.action = { $in: [MatchLogAction.DELETED, MatchLogAction.SCHEDULE_REPLACED] };
     const entries = await this.logs.find(filter).sort({ createdAt: -1, _id: -1 }).limit(500).lean();
-    return this.view(entries);
+    return this.view(entries, tournamentId);
   }
 
   /** Entradas con los nombres que citan (equipos, árbitros, responsable). */
-  private async view(entries: (MatchLog & { _id: Types.ObjectId })[]) {
+  private async view(entries: (MatchLog & { _id: Types.ObjectId })[], tournamentId: string | Types.ObjectId) {
     const teamIds = new Set<string>();
     const refereeIds = new Set<string>();
     const scan = (v: unknown, key = '') => {
@@ -236,15 +239,17 @@ export class MatchLogService {
       else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) scan(x, k === 'from' || k === 'to' ? key : k);
     };
     entries.forEach((e) => [e.changes, e.snapshot, e.deleted, e.released].forEach((x) => scan(x)));
-    const [teams, refs, users] = await Promise.all([
+    const [teams, refs, users, hist] = await Promise.all([
       this.teams.find({ _id: { $in: [...teamIds].map(toObjectId) } }).select('name').lean(),
       this.referees.find({ _id: { $in: [...refereeIds].map(toObjectId) } }).select('firstName lastName').lean(),
       this.users.find({ _id: { $in: [...new Set(entries.map((e) => e.actorId.toHexString()))].map(toObjectId) } }).select('firstName lastName').lean(),
+      this.identity.names(tournamentId),
     ]);
     return {
       entries: serialize(entries),
       refs: {
-        teams: Object.fromEntries(teams.map((t) => [t._id.toHexString(), t.name])),
+        // 10C: en un torneo finalizado, los nombres de equipo con que se jugó.
+        teams: Object.fromEntries(teams.map((t) => [t._id.toHexString(), withTeamName({ name: t.name }, t._id.toHexString(), hist).name])),
         referees: Object.fromEntries(refs.map((r) => [r._id.toHexString(), refereeName(r)])),
         users: Object.fromEntries(users.map((u) => [u._id.toHexString(), `${u.firstName} ${u.lastName}`.trim()])),
       },

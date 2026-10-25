@@ -1,3 +1,5 @@
+import { withTeamName, withPlayerName, type HistoricalNames } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -52,6 +54,7 @@ export class DisciplineService {
     @InjectModel(DisciplineLog.name) private readonly log: Model<DisciplineLog>,
     private readonly ownership: OwnershipService,
     private readonly access: TournamentAccessService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   // ─── Cálculo ────────────────────────────────────────────────────────────────
@@ -119,12 +122,12 @@ export class DisciplineService {
       readOnly: tournament.status === TournamentStatus.FINISHED,
       ...result,
       orphans: result.orphans.map((o) => ({ ...o, ref: o.key! })),
-      refs: await this.refs(result, matches),
+      refs: await this.refs(result, matches, tournament.status === TournamentStatus.FINISHED ? await this.identity.names(tournamentId) : null),
     };
   }
 
   /** Nombres de jugadores, equipos y partidos citados (para pintar sin más peticiones). */
-  private async refs(result: DisciplineResult, matches: DMatch[]) {
+  private async refs(result: DisciplineResult, matches: DMatch[], hist: HistoricalNames | null) {
     const playerIds = new Set<string>();
     const teamIds = new Set<string>();
     const matchIds = new Set<string>();
@@ -147,9 +150,10 @@ export class DisciplineService {
     ]);
     return {
       players: Object.fromEntries(
-        players.map((p) => [p._id.toHexString(), { id: p._id.toHexString(), firstName: p.firstName, lastName: p.lastName, photoUrl: p.photoUrl ?? null }]),
+        players.map((p) => [p._id.toHexString(), withPlayerName({ id: p._id.toHexString(), firstName: p.firstName, lastName: p.lastName, photoUrl: p.photoUrl ?? null }, p._id.toHexString(), hist)]),
       ),
-      teams: Object.fromEntries(teams.map((t) => [t._id.toHexString(), teamRef(t)])),
+      // 10C: en un torneo finalizado, los nombres con que se jugó.
+      teams: Object.fromEntries(teams.map((t) => [t._id.toHexString(), withTeamName(teamRef(t), t._id.toHexString(), hist)])),
       matches: Object.fromEntries(refMatches.map((m) => [m.id, m])),
     };
   }

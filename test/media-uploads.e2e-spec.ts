@@ -316,3 +316,25 @@ describe('Portada de equipo', () => {
     expect(destroy).toHaveBeenCalledWith(pid2);
   });
 });
+
+describe('10C — escudo con que se jugó un torneo finalizado', () => {
+  it('no se borra de Cloudinary al reemplazarlo o quitarlo; la foto histórica conserva su URL', async () => {
+    const team = await newTeam(A);
+    const first = (await send(as(A).put(`/api/teams/${team}/logo`)).expect(200)).body.logoUrl as string;
+    const firstId = (await teams.findById(team).select('+logoPublicId').lean())!.logoPublicId;
+    const t = (await as(A).post('/api/tournaments').send({ name: `Escudos ${Date.now()}`, format: 'FOOTBALL_7', category: 'Libre', startDate: '2026-01-01', status: 'ACTIVE' }).expect(201)).body.id;
+    await as(A).post(`/api/tournaments/${t}/teams/${team}`).expect(201);
+    await as(A).post(`/api/tournaments/${t}/finish`).send({}).expect(200);
+    destroy.mockClear();
+    // Reemplazo: el escudo anterior está en la foto del torneo → se conserva.
+    const second = (await send(as(A).put(`/api/teams/${team}/logo`)).expect(200)).body.logoUrl as string;
+    expect(second).not.toBe(first);
+    expect(destroy).not.toHaveBeenCalledWith(firstId);
+    const identity = (await api().get(`/api/tournaments/${t}/identity`).expect(200)).body;
+    expect(identity.teams[0].logoUrl).toBe(first);
+    // El segundo no está en ninguna foto: quitarlo sí lo borra.
+    const secondId = (await teams.findById(team).select('+logoPublicId').lean())!.logoPublicId;
+    await as(A).delete(`/api/teams/${team}/logo`).expect(200);
+    expect(destroy).toHaveBeenCalledWith(secondId);
+  });
+});

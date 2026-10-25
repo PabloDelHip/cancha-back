@@ -1,3 +1,5 @@
+import { withPlayerName, withTeamName } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -65,6 +67,7 @@ export class MatchSheetService {
     private readonly incidents: MatchIncidentsService,
     private readonly log: MatchLogService,
     private readonly evidence: EvidenceService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   // ─── Lectura ────────────────────────────────────────────────────────────────
@@ -85,12 +88,14 @@ export class MatchSheetService {
       this.evidence.ofMatch(match._id),
     ]);
     const playerIds = [...new Set([...statRows.map((s) => s.playerId.toHexString()), ...(sheet?.teams ?? []).flatMap((t) => t.players.map((p) => p.playerId.toHexString()))])];
-    const [players, memberships, closer] = await Promise.all([
+    const [players, memberships, closer, hist] = await Promise.all([
       this.players.find({ _id: { $in: playerIds.map(toObjectId) } }).select('firstName lastName nickname position photoUrl').lean(),
       this.memberships.find({ tournamentId: match.tournamentId, playerId: { $in: playerIds.map(toObjectId) } }).select('playerId teamId jerseyNumber active startDate endDate registeredAt').lean(),
       match.sheetClosed ? this.users.findById(match.sheetClosed.by).select('firstName lastName').lean() : null,
+      this.identity.names(match.tournamentId),
     ]);
-    const playerById = new Map(players.map((p) => [p._id.toHexString(), p]));
+    // 10C: en un torneo finalizado, equipos y jugadores con los nombres con que se jugó.
+    const playerById = new Map(players.map((p) => [p._id.toHexString(), withPlayerName(p, p._id.toHexString(), hist)]));
     const nameOf = (id: string) => {
       const p = playerById.get(id);
       return p ? `${p.firstName} ${p.lastName}` : null;
@@ -98,7 +103,8 @@ export class MatchSheetService {
     const jerseyOf = (id: string, teamId: Types.ObjectId) => memberships.find((m) => sameId(m.playerId, id) && sameId(m.teamId, teamId) && belongsOn(m, match.date))?.jerseyNumber ?? null;
 
     const side = (teamId: Types.ObjectId, which: 'home' | 'away') => {
-      const team = teams.find((t) => sameId(t._id, teamId));
+      const found = teams.find((t) => sameId(t._id, teamId));
+      const team = found ? withTeamName(found, teamId.toHexString(), hist) : undefined;
       const lineup = sheet?.teams.find((t) => sameId(t.teamId, teamId)) ?? null;
       const participation = lineup?.players.length ? participationOf(lineup) : null;
       const rows = statRows.filter((s) => sameId(s.teamId, teamId));

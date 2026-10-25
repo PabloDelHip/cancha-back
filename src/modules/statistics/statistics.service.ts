@@ -1,3 +1,5 @@
+import { teamMapWithNames, playerMapWithNames, withTeamName } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -45,6 +47,7 @@ export class StatisticsService {
     private readonly enrollments: Model<TournamentTeam>,
     @InjectModel(Team.name) private readonly teams: Model<Team>,
     @InjectModel(Player.name) private readonly players: Model<Player>,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   /**
@@ -68,10 +71,13 @@ export class StatisticsService {
     const withdrawn = new Set(
       (await this.enrollments.find({ tournamentId: toObjectId(tournamentId), withdrawnAt: { $ne: null } }).select('teamId').lean()).map((e) => e.teamId.toHexString()),
     );
-    const [all, teams] = await Promise.all([
+    const [all, live, names] = await Promise.all([
       this.finishedMatches({ tournamentId: toObjectId(tournamentId) }),
       this.teamsById(teamIds),
+      this.identity.names(tournamentId),
     ]);
+    // 10C: torneo finalizado → los nombres con que se jugó (también para el desempate por nombre).
+    const teams = teamMapWithNames(live, names);
     const matches = phaseMatches(all.map((m) => ({ ...m, stage: m.stage ?? null })), 0);
     return computeStandings(
       teamIds,
@@ -98,10 +104,13 @@ export class StatisticsService {
       matchId: { $in: matches.map((m) => toObjectId(m.id)) },
     });
     const rows = computeTopScorers(matches, stats, limit);
-    const [players, teams] = await Promise.all([
+    const [livePlayers, liveTeams, names] = await Promise.all([
       this.playersById(rows.map((r) => r.playerId)),
       this.teamsById(rows.map((r) => r.teamId)),
+      this.identity.names(tournamentId),
     ]);
+    const players = playerMapWithNames(livePlayers, names);
+    const teams = teamMapWithNames(liveTeams, names);
     return rows.map((r) => ({
       ...r,
       player: players.get(r.playerId) ?? null,
@@ -121,11 +130,12 @@ export class StatisticsService {
     const tournamentIds = [
       ...new Set(entries.map((e) => e.match.tournamentId)),
     ];
-    const [tournaments, teams] = await Promise.all([
+    const [tournaments, teams, names] = await Promise.all([
       this.tournaments
         .find({ _id: { $in: tournamentIds.map(toObjectId) } })
         .lean(),
       this.teamsById(entries.map((e) => e.stat.teamId)),
+      this.identity.namesFor(tournamentIds),
     ]);
     const tournamentById = new Map(
       serialize(tournaments.map(withCoverage)).map((t) => [t.id, t]),
@@ -136,7 +146,7 @@ export class StatisticsService {
         const [tournamentId, teamId] = key.split('|');
         return {
           tournament: tournamentById.get(tournamentId) ?? null,
-          team: teams.get(teamId) ?? null,
+          team: ((t) => (t ? withTeamName(t, teamId, names.get(tournamentId)) : null))(teams.get(teamId)),
           ...sumTotals(list.map((e) => e.stat)),
         };
       })
@@ -165,8 +175,9 @@ export class StatisticsService {
       officialMatchesPipeline(playerId, { skip: skipFor(query), limit: query.limit }),
     );
     const rows = facet?.rows ?? [];
-    const [teams, tournaments] = await Promise.all([
+    const [teams, names, tournaments] = await Promise.all([
       this.teamsById(rows.flatMap((r) => [r.match.homeTeamId.toHexString(), r.match.awayTeamId.toHexString()])),
+      this.identity.namesFor(rows.map((r) => r.match.tournamentId)),
       this.tournaments
         .find({ _id: { $in: rows.map((r) => r.match.tournamentId) } })
         .select('name')
@@ -177,13 +188,14 @@ export class StatisticsService {
       const match = serialize(raw);
       const stat = serialize(rawStat);
       const isHome = match.homeTeamId === stat.teamId;
+      const teamOf = (id: string) => ((t) => (t ? withTeamName(t, id, names.get(match.tournamentId)) : null))(teams.get(id));
       return {
         match,
         stats: stat,
         isHome,
         tournament: { id: match.tournamentId, name: tournamentName.get(match.tournamentId) ?? null },
-        team: teams.get(stat.teamId) ?? null,
-        opponent: teams.get(isHome ? match.awayTeamId : match.homeTeamId) ?? null,
+        team: teamOf(stat.teamId),
+        opponent: teamOf(isHome ? match.awayTeamId : match.homeTeamId),
         result: resultFor(match, stat.teamId),
       };
     });

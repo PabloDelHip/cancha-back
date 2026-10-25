@@ -56,6 +56,8 @@ export interface ReportDoc {
   generatedAt: Date;
   /** Filtros aplicados, como texto («Equipo: Halcones», «Jornada 3»). */
   filters: string[];
+  /** 10C: en torneos finalizados, de dónde salen los nombres (históricos o actuales). */
+  namesNote?: string | null;
   /** Logo del torneo (PNG o JPEG) o null: el PDF dibuja las iniciales. */
   logo: Buffer | null;
   logoInitials: string;

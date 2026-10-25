@@ -1,3 +1,5 @@
+import { withTeamName, withPlayerName } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { TournamentAccessService } from '../../common/authorization/tournament-access.service.js';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -39,6 +41,7 @@ export class LeaguesService {
     private readonly organizers: OrganizerAccessService,
     private readonly competition: CompetitionService,
     private readonly tournamentAccess: TournamentAccessService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   async create(dto: CreateLeagueDto, user: AuthUser) {
@@ -137,6 +140,10 @@ export class LeaguesService {
       decidedBy: 'LEAGUE_TABLE' | 'FINAL';
       topScorer: { player: ReturnType<typeof publicPlayer>; goals: number } | null;
     }[] = [];
+    // 10C: cada temporada finalizada con los nombres con que se jugó (la tabla histórica y los
+    // totales de jugadores suman varias temporadas: usan el nombre actual de cada equipo o jugador).
+    const names = await this.identity.namesFor(ids);
+    const teamIn = (tid: string, teamId: string) => ((t) => (t ? withTeamName(t, teamId, names.get(tid)) : null))(teams.get(teamId));
     for (const t of tournaments) {
       const tid = t._id.toHexString();
       if (t.status !== TournamentStatus.FINISHED) continue;
@@ -149,10 +156,10 @@ export class LeaguesService {
       champions.push({
         tournament: tournamentRef(t),
         year: Number(t.startDate.slice(0, 4)),
-        champion: view.championTeamId ? (teams.get(view.championTeamId) ?? null) : null,
-        runnerUp: loser ? (teams.get(loser) ?? null) : null,
+        champion: view.championTeamId ? teamIn(tid, view.championTeamId) : null,
+        runnerUp: loser ? teamIn(tid, loser) : null,
         decidedBy: ko ? 'FINAL' : 'LEAGUE_TABLE',
-        topScorer: top && players.has(top[0]) ? { player: players.get(top[0])!, goals: top[1] } : null,
+        topScorer: top && players.has(top[0]) ? { player: withPlayerName(players.get(top[0])!, top[0], names.get(tid)), goals: top[1] } : null,
       });
     }
     champions.reverse(); // más reciente primero
@@ -259,8 +266,8 @@ export class LeaguesService {
           const t = tournaments.find((x) => x._id.equals(m.tournamentId));
           return t ? { id: t._id.toHexString(), name: t.name } : null;
         })(),
-        homeTeam: teams.get(m.homeTeamId.toHexString()) ?? null,
-        awayTeam: teams.get(m.awayTeamId.toHexString()) ?? null,
+        homeTeam: teamIn(m.tournamentId.toHexString(), m.homeTeamId.toHexString()),
+        awayTeam: teamIn(m.tournamentId.toHexString(), m.awayTeamId.toHexString()),
         homeScore: m.homeScore!,
         awayScore: m.awayScore!,
       };

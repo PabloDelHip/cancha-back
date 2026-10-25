@@ -13,6 +13,11 @@ import { TournamentMembersService } from './tournament-members.service.js';
 import { TournamentInvitationsController } from './tournament-invitations.controller.js';
 import { TournamentInvitationsService } from './tournament-invitations.service.js';
 
+import { DisciplineModule } from '../discipline/discipline.module.js';
+import { FinanceModule } from '../finance/finance.module.js';
+import { TournamentClosureController } from './tournament-closure.controller.js';
+import { TournamentClosureService } from './tournament-closure.service.js';
+
 @Module({
   imports: [
     CompetitionModule,
@@ -20,6 +25,9 @@ import { TournamentInvitationsService } from './tournament-invitations.service.j
     RefereesModule,
     MatchLogModule,
     MatchIncidentsModule,
+    // 10A: la vista previa del cierre reutiliza disciplina y finanzas (sus reglas y permisos).
+    DisciplineModule,
+    FinanceModule,
     MongooseModule.forFeature([
       Models.tournament,
       Models.tournamentTeam,
@@ -39,9 +47,11 @@ import { TournamentInvitationsService } from './tournament-invitations.service.j
       Models.playerBlock,
       Models.removedEnrollment,
       Models.financeEntry,
+      Models.playerMatchStats,
+      Models.player,
     ]),
   ],
-  controllers: [TournamentsController, TournamentMembersController, TournamentInvitationsController],
-  providers: [TournamentsService, TournamentMembersService, TournamentInvitationsService],
+  controllers: [TournamentsController, TournamentMembersController, TournamentInvitationsController, TournamentClosureController],
+  providers: [TournamentsService, TournamentMembersService, TournamentInvitationsService, TournamentClosureService],
 })
 export class TournamentsModule {}

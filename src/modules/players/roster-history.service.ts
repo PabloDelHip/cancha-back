@@ -1,3 +1,5 @@
+import { withPlayerName, withTeamName, type HistoricalNames } from '../../common/history/identity.js';
+import { TournamentIdentityService } from '../../common/history/tournament-identity.service.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -36,6 +38,7 @@ export class RosterHistoryService {
     @InjectModel(Team.name) private readonly teams: Model<Team>,
     @InjectModel(User.name) private readonly users: Model<User>,
     private readonly ownership: OwnershipService,
+    private readonly identity: TournamentIdentityService,
   ) {}
 
   async list(tournamentId: string, query: RosterHistoryQueryDto, user: AuthUser) {
@@ -61,11 +64,11 @@ export class RosterHistoryService {
     assignBlockTeams(events, [...sources.memberships, ...sources.removed.flatMap((r) => r.memberships)]);
     const shown = sortHistory(filterHistory(events, { playerId: query.playerId, teamId: query.teamId, actions: query.action, from: query.from, to: query.to }));
     const page = shown.slice(skipFor(query), skipFor(query) + query.limit);
-    return { ...paginated(page, shown.length, query), refs: await this.refs(page) };
+    return { ...paginated(page, shown.length, query), refs: await this.refs(page, await this.identity.names(tid)) };
   }
 
   /** Nombres que cita la página (jugadores, equipos y autores). Sin datos personales extra. */
-  private async refs(page: ReturnType<typeof deriveHistory>) {
+  private async refs(page: ReturnType<typeof deriveHistory>, hist: HistoricalNames | null) {
     const ids = (values: (string | null | undefined)[]) => [...new Set(values.filter((v): v is string => !!v))].map(toObjectId);
     const [players, teams, users] = await Promise.all([
       this.players.find({ _id: { $in: ids(page.map((e) => e.playerId)) } }).select('firstName lastName').lean(),
@@ -73,8 +76,9 @@ export class RosterHistoryService {
       this.users.find({ _id: { $in: ids(page.map((e) => e.by?.userId)) } }).select('firstName lastName').lean(),
     ]);
     return {
-      players: Object.fromEntries(players.map((p) => [p._id.toHexString(), `${p.firstName} ${p.lastName}`.trim()])),
-      teams: Object.fromEntries(teams.map((t) => [t._id.toHexString(), t.name])),
+      // 10C: en un torneo finalizado, los nombres con que se jugó (los autores son usuarios: actuales).
+      players: Object.fromEntries(players.map((p) => ((n) => [p._id.toHexString(), `${n.firstName} ${n.lastName}`.trim()])(withPlayerName(p, p._id.toHexString(), hist)))),
+      teams: Object.fromEntries(teams.map((t) => [t._id.toHexString(), withTeamName({ name: t.name }, t._id.toHexString(), hist).name])),
       users: Object.fromEntries(users.map((u) => [u._id.toHexString(), `${u.firstName} ${u.lastName}`.trim()])),
     };
   }
